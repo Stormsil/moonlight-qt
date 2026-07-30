@@ -166,6 +166,7 @@ macx {
 }
 
 SOURCES += \
+    argus/startupchannel.cpp \
     argus/workerbootstrap.cpp \
     backend/nvaddress.cpp \
     backend/nvapp.cpp \
@@ -208,6 +209,7 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
+    argus/startupchannel.h \
     argus/workerbootstrap.h \
     SDL_compat.h \
     backend/nvaddress.h \

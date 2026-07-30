@@ -1,18 +1,14 @@
 #include "workerbootstrap.h"
+#include "startupchannel.h"
 
 #include <QCoreApplication>
 #include <QRegularExpression>
 
 #include <cstring>
 
-#if defined(Q_OS_WIN)
-#include <qt_windows.h>
-#endif
-
 namespace
 {
 
-constexpr int StartupPipeWaitMilliseconds = 5000;
 constexpr int MaximumStartupPipeNameCharacters = 240;
 
 bool parseArguments(const QStringList& arguments)
@@ -48,34 +44,6 @@ bool isValidPipeName(const QString& pipeName)
         && pipeName.size() <= MaximumStartupPipeNameCharacters
         && validName.match(pipeName).hasMatch();
 }
-
-#if defined(Q_OS_WIN)
-bool connectToStartupPipe(const QString& pipeName)
-{
-    const QString pipePath =
-        QStringLiteral("\\\\.\\pipe\\") + pipeName;
-    if (!WaitNamedPipeW(
-            reinterpret_cast<LPCWSTR>(pipePath.utf16()),
-            StartupPipeWaitMilliseconds)) {
-        return false;
-    }
-
-    HANDLE pipe = CreateFileW(
-        reinterpret_cast<LPCWSTR>(pipePath.utf16()),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (pipe == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    CloseHandle(pipe);
-    return true;
-}
-#endif
 
 }
 
@@ -121,16 +89,14 @@ int runStartup(const QStringList& arguments)
         return ExitStartupCapabilityUnavailable;
     }
 
-#if defined(Q_OS_WIN)
-    const bool connected = connectToStartupPipe(pipeName);
+    StartupChannel channel;
+    StartupPayload payload;
+    const StartupChannelStatus status =
+        channel.receive(pipeName, payload);
     pipeName.fill(QChar('\0'));
-    return connected
-        ? ExitHandshakeProtocolPending
+    return status == StartupChannelStatus::Accepted
+        ? ExitSuccess
         : ExitHandshakeUnavailable;
-#else
-    pipeName.fill(QChar('\0'));
-    return ExitHandshakeUnavailable;
-#endif
 }
 
 }

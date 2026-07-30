@@ -11,7 +11,6 @@ inline constexpr char StartupPipeEnvironmentVariable[] =
 enum ExitCode {
     ExitSuccess = 0,
     ExitInvalidArguments = 64,
-    ExitHandshakeProtocolPending = 70,
     ExitStartupCapabilityUnavailable = 78,
     ExitHandshakeUnavailable = 79,
 };

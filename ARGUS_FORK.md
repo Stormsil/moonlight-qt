@@ -36,10 +36,23 @@ the existing entry point.
 Worker startup accepts only an inherited `ARGUS_STREAM_STARTUP_PIPE` capability.
 It removes that variable immediately, rejects endpoint material and all
 unrecognized arguments, validates the bounded pipe name, and fails closed when
-the capability or pipe is unavailable. The current slice only proves argument
-routing and connection to the inherited pipe. It deliberately exits before
-claiming an authenticated handshake, protected identity delivery, streaming,
-pairing, first-frame, or performance support.
+the capability or pipe is unavailable.
+
+The native `StartupChannel` implements version 1 of the single managed contract
+in Bot-Mox `StreamWorkerStartupHandshake.cs`: bounded little-endian
+length-prefixed packets, the 32-byte challenge nonce, opaque
+`.NET Guid.ToByteArray()` session fields, and an exact PID plus Windows process
+creation-time hello. Endpoint, identity bytes, and the required frame-slot
+descriptor are read only after the managed server accepts that hello. The
+channel is single-use, has one overall I/O deadline, performs no retry or
+downgrade, rejects malformed/truncated/trailing/out-of-bounds packets, and
+zeroes temporary packet, nonce, endpoint, identity, and capability buffers.
+
+The accepted identity remains only in a zeroizing typed in-memory payload. It
+is not persisted or installed into `IdentityManager`: the managed
+`moonlight-qt` identity format does not yet define how its opaque bytes encode
+Moonlight's certificate PEM, private-key PEM, and unique ID. Ordinary pairing
+and `QSettings` identity ownership are therefore unchanged.
 
 The focused bootstrap test is built and run with:
 
@@ -52,6 +65,12 @@ nmake /f Makefile.Release
 Pop-Location
 ```
 
+The managed Bot-Mox harness additionally launches the built `Moonlight.exe` as
+the real child. It proves a valid payload is accepted, wrong PID and exact
+creation-time receipts are rejected by the managed server, the worker exits
+nonzero on rejection, and stdout/stderr remain empty. This is startup-channel
+interop evidence only, not a production readiness or streaming receipt.
+
 ## Reuse seams
 
 - Pairing must remain on the existing
@@ -63,8 +82,8 @@ Pop-Location
 
 ## Remaining gates
 
-This spike is not release-ready. It still requires the authenticated startup
-protocol, Machine-bound identity ingestion, decoded-frame transport, real
-Sunshine pairing/streaming/first-frame evidence, 1920x1080 performance evidence,
-and GPL/legal approval for the eventual distribution boundary. No release or
-package is published from this branch.
+This spike is not release-ready. It still requires a versioned protected
+identity encoding and integration with the existing Moonlight identity owner,
+decoded-frame transport, real Sunshine pairing/streaming/first-frame evidence,
+1920x1080 performance evidence, and GPL/legal approval for the eventual
+distribution boundary. No release or package is published from this branch.
