@@ -44,6 +44,7 @@
 #include "cli/startstream.h"
 #include "cli/pair.h"
 #include "cli/commandlineparser.h"
+#include "argus/workerbootstrap.h"
 #include "path.h"
 #include "utils.h"
 #include "gui/computermodel.h"
@@ -421,6 +422,10 @@ void configureSignalHandlers()
 int main(int argc, char *argv[])
 {
     SDL_SetMainReady();
+
+    if (ArgusWorker::isRequested(argc, argv)) {
+        return ArgusWorker::run(argc, argv);
+    }
 
     // Set the app version for the QCommandLineParser's showVersion() command
     QCoreApplication::setApplicationVersion(VERSION_STR);
