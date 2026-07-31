@@ -48,6 +48,24 @@ function Invoke-Git {
     return @($outputLines | ForEach-Object { $_.ToString() })
 }
 
+function Get-Sha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        return [BitConverter]::ToString(
+            $algorithm.ComputeHash($stream)).Replace('-', '')
+    }
+    finally {
+        $stream.Dispose()
+        $algorithm.Dispose()
+    }
+}
+
 function Get-MaterializedTreeSha256 {
     param(
         [Parameter(Mandatory = $true)]
@@ -55,11 +73,11 @@ function Get-MaterializedTreeSha256 {
     )
 
     $paths = [Collections.Generic.List[string]]::new()
+    $rootUri = [Uri]([IO.Path]::GetFullPath($Root).TrimEnd('\') + '\')
     Get-ChildItem -LiteralPath $Root -Recurse -File -Force |
         ForEach-Object {
-            $relative = [IO.Path]::GetRelativePath(
-                $Root,
-                $_.FullName).Replace('\', '/')
+            $relative = [Uri]::UnescapeDataString(
+                $rootUri.MakeRelativeUri([Uri]$_.FullName).ToString())
             if ($relative -notmatch '(^|/)\.git($|/)') {
                 $paths.Add($relative)
             }
@@ -71,14 +89,14 @@ function Get-MaterializedTreeSha256 {
     try {
         foreach ($relative in $ordered) {
             $fullPath = Join-Path $Root $relative.Replace('/', '\')
-            $fileHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).
-                Hash.ToLowerInvariant()
+            $fileHash = (Get-Sha256 $fullPath).ToLowerInvariant()
             $hash.AppendData([Text.Encoding]::UTF8.GetBytes($relative))
             $hash.AppendData([byte[]] 0)
             $hash.AppendData([Text.Encoding]::ASCII.GetBytes($fileHash))
             $hash.AppendData([byte[]] 10)
         }
-        return [Convert]::ToHexString($hash.GetHashAndReset())
+        return [BitConverter]::ToString(
+            $hash.GetHashAndReset()).Replace('-', '')
     }
     finally {
         $hash.Dispose()
@@ -103,7 +121,7 @@ $commonCHead = @(Invoke-Git $commonC @('rev-parse', 'HEAD'))[-1].Trim()
 if ($commonCHead -cne $contract.baseCommit) {
     throw 'The materialized common-c base commit drifted.'
 }
-$patchSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $patchPath).Hash
+$patchSha256 = Get-Sha256 $patchPath
 $resultTreeSha256 = Get-MaterializedTreeSha256 $commonC
 if (($patchSha256 -cne $contract.patchSha256) -or
     ($resultTreeSha256 -cne $contract.resultTreeSha256)) {
@@ -114,7 +132,7 @@ $expectedWorker = Join-Path $source "build\deploy-$Architecture-$Configuration\M
 if ([IO.Path]::GetFullPath($worker) -cne [IO.Path]::GetFullPath($expectedWorker)) {
     throw 'The build receipt worker path is not the canonical build output.'
 }
-$workerSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $worker).Hash
+$workerSha256 = Get-Sha256 $worker
 $receipt = [ordered]@{
     schemaVersion = 1
     forkCommit = $forkCommit
