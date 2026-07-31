@@ -25,6 +25,22 @@
       "licenseSha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD"
     },
     {
+      "name": "ENet",
+      "repository": "https://github.com/cgutman/enet",
+      "commit": "aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
+      "license": "MIT",
+      "licensePath": "moonlight-common-c/moonlight-common-c/enet/LICENSE",
+      "licenseSha256": "3C326D1182A09BDD48101B7EAB2BF2312C76286E756B46CD24844359D7DFECF3"
+    },
+    {
+      "name": "nanors",
+      "repository": "https://github.com/sleepybishop/nanors",
+      "commit": "b1e3c22ca0cdc0bb83e3cd6ed1a2fc77869ed99a",
+      "license": "MIT",
+      "licensePath": "moonlight-common-c/moonlight-common-c/nanors/LICENSE",
+      "licenseSha256": "22372A6DA1D4FBF640798A70C1014FF47B9669E2CD97A98BCA5FC6D38FC67A82"
+    },
+    {
       "name": "qmdnsengine",
       "repository": "https://github.com/cgutman/qmdnsengine",
       "commit": "b7a5a9f225d5e14b39f9fd1f905c4f505cf2ee99",

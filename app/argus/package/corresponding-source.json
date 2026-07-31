@@ -7,6 +7,8 @@
   "sourceBranch": "argus/headless-worker-v1",
   "submodules": [
     "moonlight-common-c/moonlight-common-c@e41355ea01670fd4c830b384009d31dd0339a705",
+    "moonlight-common-c/moonlight-common-c/enet@aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
+    "moonlight-common-c/moonlight-common-c/nanors@b1e3c22ca0cdc0bb83e3cd6ed1a2fc77869ed99a",
     "qmdnsengine/qmdnsengine@b7a5a9f225d5e14b39f9fd1f905c4f505cf2ee99",
     "app/SDL_GameControllerDB@8d9fefd7b810f2541f78cc7a8ccbd185bc84c7a5"
   ],
