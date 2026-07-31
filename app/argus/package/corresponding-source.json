@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "artifact": "Moonlight.exe Argus worker checkpoint",
+  "forkCommitAuthority": "resolved-by-final-package-receipt",
+  "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
+  "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
+  "sourceBranch": "argus/headless-worker-v1",
+  "submodules": [
+    "moonlight-common-c/moonlight-common-c@e41355ea01670fd4c830b384009d31dd0339a705",
+    "qmdnsengine/qmdnsengine@b7a5a9f225d5e14b39f9fd1f905c4f505cf2ee99",
+    "app/SDL_GameControllerDB@8d9fefd7b810f2541f78cc7a8ccbd185bc84c7a5"
+  ],
+  "toolchain": {
+    "qt": "6.11.1 msvc2022_64",
+    "visualStudio": "18.8",
+    "configuration": "Release x64"
+  },
+  "buildSteps": [
+    "clone the exact fork commit recorded by the final package receipt",
+    "git submodule update --init --recursive",
+    "provide task-local Qt 6.11.1 msvc2022_64 and 7-Zip on process-local PATH",
+    "run scripts\\build-arch.bat Release x64"
+  ],
+  "expectedOutput": "build/deploy-x64-release/Moonlight.exe",
+  "sourceOfferPrepared": false,
+  "distributionAllowed": false,
+  "legalApproval": false,
+  "blockers": [
+    "exact runtime dependency source and notice bundle is incomplete",
+    "corresponding-source delivery mechanism is not implemented",
+    "professional legal approval is absent"
+  ]
+}

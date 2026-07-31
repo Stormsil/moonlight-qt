@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "product": "Moonlight Qt Argus worker checkpoint",
+  "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
+  "sourceBranch": "argus/headless-worker-v1",
+  "upstreamRepository": "https://github.com/moonlight-stream/moonlight-qt",
+  "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
+  "historyPreserved": true,
+  "capabilities": {
+    "argusWorkerProtocol": 1,
+    "noInputConnection": false
+  },
+  "rootLicense": {
+    "spdxExpression": "GPL-3.0-only",
+    "path": "LICENSE",
+    "sha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD"
+  },
+  "sourceComponents": [
+    {
+      "name": "moonlight-common-c",
+      "repository": "https://github.com/moonlight-stream/moonlight-common-c",
+      "commit": "e41355ea01670fd4c830b384009d31dd0339a705",
+      "license": "GPL-3.0-only",
+      "licensePath": "moonlight-common-c/moonlight-common-c/LICENSE.txt",
+      "licenseSha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD"
+    },
+    {
+      "name": "qmdnsengine",
+      "repository": "https://github.com/cgutman/qmdnsengine",
+      "commit": "b7a5a9f225d5e14b39f9fd1f905c4f505cf2ee99",
+      "license": "MIT",
+      "licensePath": "qmdnsengine/qmdnsengine/LICENSE.txt",
+      "licenseSha256": "19F7BC4C95863835A04992FBFE076D209C51A1D98314E0379C0809E9D8784314"
+    },
+    {
+      "name": "SDL_GameControllerDB",
+      "repository": "https://github.com/gabomdq/SDL_GameControllerDB",
+      "commit": "8d9fefd7b810f2541f78cc7a8ccbd185bc84c7a5",
+      "license": "Zlib",
+      "licensePath": "app/SDL_GameControllerDB/LICENSE",
+      "licenseSha256": "6B8DA877F518BAE3E261B2613754CC97E916F20001C5499B4CEA6680AC6D1E1B"
+    },
+    {
+      "name": "h264bitstream",
+      "repository": "included-source-tree",
+      "commit": "NOASSERTION",
+      "license": "LGPL-2.1-only",
+      "licensePath": "h264bitstream/LICENSE",
+      "licenseSha256": "C3ABD79A304B8E35FFAFD462274B59009D893328FC221F00075116AAABC19804"
+    }
+  ],
+  "runtimeBinaryFamilies": [
+    "Qt 6.11.1",
+    "FFmpeg avcodec-62/avformat-62/avutil-60/swscale-9",
+    "OpenSSL 3",
+    "SDL2 and SDL3",
+    "Opus",
+    "dav1d",
+    "libplacebo-365",
+    "discord-rpc",
+    "Microsoft Visual C++ runtime"
+  ],
+  "runtimeLicenseConclusion": "NOASSERTION",
+  "runtimeNoticeStatus": "blocked-until-exact-binary-provenance-and-distributable-notices-are-assembled",
+  "distributionAllowed": false,
+  "legalApproval": false
+}
