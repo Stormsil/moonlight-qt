@@ -11,6 +11,11 @@ class StreamingPreferences : public QObject
 public:
     static StreamingPreferences* get(QQmlEngine *qmlEngine = nullptr);
 
+    static StreamingPreferences* createArgusWorker(
+        int width,
+        int height,
+        int fps);
+
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
@@ -241,6 +246,7 @@ signals:
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
+    StreamingPreferences(QQmlEngine *qmlEngine, bool loadSettings);
 
     QString getSuffixFromLanguage(Language lang);
 

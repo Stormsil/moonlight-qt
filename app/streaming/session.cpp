@@ -1,4 +1,5 @@
 #include "session.h"
+#include "argus/decodedframesink.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "backend/richpresencemanager.h"
@@ -39,6 +40,7 @@
 #include <QImage>
 #include <QGuiApplication>
 #include <QCursor>
+#include <QElapsedTimer>
 #include <QScreen>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -46,6 +48,28 @@
 #endif
 
 #define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
+
+namespace
+{
+
+int argusAudioInit(
+    int,
+    const POPUS_MULTISTREAM_CONFIGURATION,
+    void*,
+    int)
+{
+    return 0;
+}
+
+void argusAudioCleanup()
+{
+}
+
+void argusAudioDiscard(char*, int)
+{
+}
+
+}
 
 CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clStageStarting,
@@ -63,6 +87,22 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clSetAdaptiveTriggers
 };
 
+CONNECTION_LISTENER_CALLBACKS Session::k_ArgusConnCallbacks = {
+    Session::clStageStarting,
+    nullptr,
+    Session::clStageFailed,
+    nullptr,
+    Session::clConnectionTerminated,
+    Session::clLogMessage,
+    nullptr,
+    Session::clConnectionStatusUpdate,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr
+};
+
 Session* Session::s_ActiveSession;
 QSemaphore Session::s_ActiveSessionSemaphore(1);
 
@@ -76,6 +116,14 @@ void Session::clStageStarting(int stage)
 
 void Session::clStageFailed(int stage, int errorCode)
 {
+    if (s_ActiveSession->m_ArgusHeadless) {
+        s_ActiveSession->m_ArgusTerminationCode.storeRelease(errorCode);
+        emit s_ActiveSession->stageFailed(
+            QString::fromLocal8Bit(LiGetStageName(stage)),
+            errorCode,
+            QString());
+        return;
+    }
     // Perform the port test now, while we're on the async connection thread and not blocking the UI.
     unsigned int portFlags = LiGetPortFlagsFromStage(stage);
     s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
@@ -87,6 +135,10 @@ void Session::clStageFailed(int stage, int errorCode)
 
 void Session::clConnectionTerminated(int errorCode)
 {
+    if (s_ActiveSession->m_ArgusHeadless) {
+        s_ActiveSession->m_ArgusTerminationCode.storeRelease(errorCode);
+        return;
+    }
     unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
     s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
 
@@ -584,7 +636,9 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
-      m_DropAudioEndTime(0)
+      m_DropAudioEndTime(0),
+      m_ArgusHeadless(false),
+      m_ArgusTerminationCode(0)
 {
 }
 
@@ -718,10 +772,18 @@ bool Session::initialize(QQuickWindow* qtWindow)
     }
 
     LiInitializeAudioCallbacks(&m_AudioCallbacks);
-    m_AudioCallbacks.init = arInit;
-    m_AudioCallbacks.cleanup = arCleanup;
-    m_AudioCallbacks.decodeAndPlaySample = arDecodeAndPlaySample;
-    m_AudioCallbacks.capabilities = getAudioRendererCapabilities(m_StreamConfig.audioConfiguration);
+    if (m_ArgusHeadless) {
+        m_AudioCallbacks.init = argusAudioInit;
+        m_AudioCallbacks.cleanup = argusAudioCleanup;
+        m_AudioCallbacks.decodeAndPlaySample = argusAudioDiscard;
+        m_AudioCallbacks.capabilities = 0;
+    }
+    else {
+        m_AudioCallbacks.init = arInit;
+        m_AudioCallbacks.cleanup = arCleanup;
+        m_AudioCallbacks.decodeAndPlaySample = arDecodeAndPlaySample;
+        m_AudioCallbacks.capabilities = getAudioRendererCapabilities(m_StreamConfig.audioConfiguration);
+    }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Audio channel count: %d",
@@ -960,6 +1022,93 @@ bool Session::initialize(QQuickWindow* qtWindow)
     return true;
 }
 
+bool Session::initializeArgusHeadless()
+{
+    m_ArgusHeadless = true;
+    return initialize(nullptr);
+}
+
+Session::ArgusHeadlessOutcome Session::runArgusHeadless(
+    int firstFrameTimeoutMilliseconds)
+{
+    if (!m_ArgusHeadless
+            || firstFrameTimeoutMilliseconds < 1000
+            || firstFrameTimeoutMilliseconds > 30000) {
+        return ArgusHeadlessOutcome::ConnectFailed;
+    }
+
+    s_ActiveSessionSemaphore.acquire();
+    s_ActiveSession = this;
+    m_ArgusTerminationCode.storeRelease(0);
+    ArgusHeadlessOutcome outcome = ArgusHeadlessOutcome::ConnectFailed;
+    if (!startConnectionAsync()) {
+        s_ActiveSession = nullptr;
+        s_ActiveSessionSemaphore.release();
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return outcome;
+    }
+
+    m_Window = SDL_CreateWindow(
+        "Argus Stream Worker",
+        SDL_WINDOWPOS_UNDEFINED,
+        SDL_WINDOWPOS_UNDEFINED,
+        qMin(m_StreamConfig.width, 64),
+        qMin(m_StreamConfig.height, 64),
+        SDL_WINDOW_HIDDEN);
+    if (m_Window != nullptr
+            && chooseDecoder(
+                StreamingPreferences::VDS_FORCE_SOFTWARE,
+                StreamingPreferences::RS_AUTO,
+                m_Window,
+                m_ActiveVideoFormat,
+                m_ActiveVideoWidth,
+                m_ActiveVideoHeight,
+                m_ActiveVideoFrameRate,
+                false,
+                false,
+                false,
+                m_VideoDecoder)) {
+        LiRequestIdrFrame();
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < firstFrameTimeoutMilliseconds
+                && m_ArgusTerminationCode.loadAcquire() == 0
+                && ArgusWorker::activeDecodedFrameMetadata().frameCount == 0) {
+            QCoreApplication::processEvents(
+                QEventLoop::ExcludeUserInputEvents);
+            SDL_Delay(5);
+        }
+
+        if (ArgusWorker::activeDecodedFrameMetadata().frameCount > 0) {
+            // Keep the real session alive briefly to prove latest-frame
+            // replacement, then perform the command's explicit disconnect.
+            SDL_Delay(100);
+            outcome = ArgusHeadlessOutcome::FirstFrame;
+            m_UnexpectedTermination = false;
+        }
+        else if (m_ArgusTerminationCode.loadAcquire() != 0) {
+            outcome = ArgusHeadlessOutcome::Terminated;
+        }
+        else {
+            outcome = ArgusHeadlessOutcome::DecodeTimedOut;
+        }
+    }
+
+    SDL_LockMutex(m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_UnlockMutex(m_DecoderLock);
+    LiStopConnection();
+    if (m_Window != nullptr) {
+        SDL_DestroyWindow(m_Window);
+        m_Window = nullptr;
+    }
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    s_ActiveSession = nullptr;
+    s_ActiveSessionSemaphore.release();
+    return outcome;
+}
+
 void Session::emitLaunchWarning(QString text)
 {
     if (m_Preferences->configurationWarnings) {
@@ -1183,7 +1332,8 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     }
 
     // Test if audio works at the specified audio configuration
-    bool audioTestPassed = testAudio(m_StreamConfig.audioConfiguration);
+    bool audioTestPassed = m_ArgusHeadless
+        || testAudio(m_StreamConfig.audioConfiguration);
 
     // Gracefully degrade to stereo if surround sound doesn't work
     if (!audioTestPassed && CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration) > 2) {
@@ -1200,7 +1350,8 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     }
 
     // Check for unmapped gamepads
-    if (!SdlInputHandler::getUnmappedGamepads().isEmpty()) {
+    if (!m_ArgusHeadless
+            && !SdlInputHandler::getUnmappedGamepads().isEmpty()) {
         emitLaunchWarning(tr("An attached gamepad has no mapping and won't be usable. Visit the Moonlight help to resolve this."));
     }
 
@@ -1616,7 +1767,9 @@ bool Session::startConnectionAsync()
                       m_App.id, &m_StreamConfig,
                       enableGameOptimizations,
                       m_Preferences->playAudioOnHost,
-                      m_InputHandler->getAttachedGamepadMask(),
+                      m_InputHandler != nullptr
+                          ? m_InputHandler->getAttachedGamepadMask()
+                          : 0,
                       !m_Preferences->multiController,
                       rtspSessionUrl);
     } catch (const GfeHttpResponseException& e) {
@@ -1703,7 +1856,11 @@ bool Session::startConnectionAsync()
                                                                          false);
     }
 
-    int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
+    CONNECTION_LISTENER_CALLBACKS* connectionCallbacks =
+        m_ArgusHeadless
+            ? &k_ArgusConnCallbacks
+            : &k_ConnCallbacks;
+    int err = LiStartConnection(&hostInfo, &m_StreamConfig, connectionCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
     if (err != 0) {

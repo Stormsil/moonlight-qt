@@ -60,9 +60,70 @@ static StreamingPreferences* s_GlobalPrefs;
 Q_GLOBAL_STATIC(QReadWriteLock, s_GlobalPrefsLock)
 
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
+    : StreamingPreferences(qmlEngine, true)
+{
+}
+
+StreamingPreferences::StreamingPreferences(
+    QQmlEngine *qmlEngine,
+    bool loadSettings)
     : m_QmlEngine(qmlEngine)
 {
-    reload();
+    if (loadSettings) {
+        reload();
+    }
+}
+
+StreamingPreferences* StreamingPreferences::createArgusWorker(
+    int width,
+    int height,
+    int fps)
+{
+    auto preferences = new StreamingPreferences(nullptr, false);
+    preferences->width = width;
+    preferences->height = height;
+    preferences->fps = fps;
+    preferences->bitrateKbps = getDefaultBitrate(
+        width,
+        height,
+        fps,
+        false);
+    preferences->unlockBitrate = false;
+    preferences->autoAdjustBitrate = false;
+    preferences->enableVsync = false;
+    preferences->gameOptimizations = false;
+    preferences->playAudioOnHost = true;
+    preferences->multiController = false;
+    preferences->enableMdns = false;
+    preferences->quitAppAfter = false;
+    preferences->absoluteMouseMode = false;
+    preferences->absoluteTouchMode = false;
+    preferences->framePacing = false;
+    preferences->connectionWarnings = false;
+    preferences->configurationWarnings = false;
+    preferences->richPresence = false;
+    preferences->gamepadMouse = false;
+    preferences->detectNetworkBlocking = false;
+    preferences->showPerformanceOverlay = false;
+    preferences->swapMouseButtons = false;
+    preferences->muteOnFocusLoss = false;
+    preferences->backgroundGamepad = false;
+    preferences->reverseScrollDirection = false;
+    preferences->swapFaceButtons = false;
+    preferences->keepAwake = false;
+    preferences->packetSize = 0;
+    preferences->audioConfig = AC_STEREO;
+    preferences->videoCodecConfig = VCC_FORCE_H264;
+    preferences->enableHdr = false;
+    preferences->enableYUV444 = false;
+    preferences->videoDecoderSelection = VDS_FORCE_SOFTWARE;
+    preferences->windowMode = WM_WINDOWED;
+    preferences->recommendedFullScreenMode = WM_WINDOWED;
+    preferences->uiDisplayMode = UI_WINDOWED;
+    preferences->language = LANG_AUTO;
+    preferences->captureSysKeysMode = CSK_OFF;
+    preferences->rendererSelection = RS_AUTO;
+    return preferences;
 }
 
 StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)

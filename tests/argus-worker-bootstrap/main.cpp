@@ -1,4 +1,5 @@
 #include "argus/workerbootstrap.h"
+#include "argus/frameslotwriter.h"
 #include "argus/pairingclient.h"
 #include "argus/pairingendpoint.h"
 #include "argus/startupchannel.h"
@@ -283,12 +284,118 @@ QByteArray encodePayload(
     if (includeFrameSlot) {
         appendText(payload, "Local\\Argus.Stream.Frame.test");
         appendText(payload, "Local\\Argus.Stream.FrameLock.test");
-        appendInt32(payload, 1);
+        appendInt32(payload, 2);
         appendInt32(payload, maxWidth);
         appendInt32(payload, 1080);
         appendInt32(payload, 8 * 1024 * 1024);
     }
     return payload;
+}
+
+QByteArray encodeStreamRequest(
+    const ArgusWorker::StartupSession& session,
+    const QByteArray& nonce,
+    const QByteArray& endpoint = "http://127.0.0.1:48989",
+    const QByteArray& serverCertificate = "server-certificate")
+{
+    QByteArray request;
+    appendInt32(request, 1);
+    appendInt32(request, 3);
+    request.append(encodeSession(session));
+    appendText(request, nonce);
+    appendText(request, endpoint);
+    appendText(request, serverCertificate);
+    appendInt32(request, 1);
+    appendInt32(request, 1);
+    appendInt32(request, 1920);
+    appendInt32(request, 1080);
+    appendInt32(request, 60);
+    appendInt32(request, 15000);
+    appendText(request, "Local\\Argus.Stream.Frame.fixture");
+    appendText(request, "Local\\Argus.Stream.FrameLock.fixture");
+    appendInt32(request, 2);
+    appendInt32(request, 1920);
+    appendInt32(request, 1080);
+    appendInt32(request, 8 * 1024 * 1024);
+    return request;
+}
+
+void checkStreamControlCodec()
+{
+    const ArgusWorker::StartupSession session = fixtureSession();
+    const QByteArray nonce(32, '\x5a');
+    const QByteArray packet = encodeStreamRequest(session, nonce);
+    ArgusWorker::StreamControlRequest request;
+    check(ArgusWorker::StreamControlCodec::decodeRequest(
+              packet,
+              session,
+              nonce,
+              request)
+              == ArgusWorker::StreamControlCodecStatus::Accepted,
+          "Managed stream request fixture must decode");
+    check(request.endpoint()
+              == QStringLiteral("http://127.0.0.1:48989")
+              && request.appId() == 1
+              && request.codec()
+                  == ArgusWorker::StreamVideoCodec::H264
+              && request.width() == 1920
+              && request.height() == 1080
+              && request.framesPerSecond() == 60
+              && request.firstFrameTimeoutMilliseconds() == 15000
+              && request.frameSlot().protocolVersion == 2,
+          "Stream request fields must retain exact managed bytes");
+
+    QByteArray wrongNonce = nonce;
+    wrongNonce[0] ^= static_cast<char>(0xff);
+    check(ArgusWorker::StreamControlCodec::decodeRequest(
+              packet,
+              session,
+              wrongNonce,
+              request)
+              == ArgusWorker::StreamControlCodecStatus::NonceMismatch,
+          "Stream request wrong nonce must fail closed");
+    wrongNonce.fill('\0');
+
+    QByteArray trailing = packet;
+    trailing.append('\0');
+    check(ArgusWorker::StreamControlCodec::decodeRequest(
+              trailing,
+              session,
+              nonce,
+              request)
+              == ArgusWorker::StreamControlCodecStatus::InvalidPacket,
+          "Stream request trailing bytes must fail closed");
+
+    ArgusWorker::StreamControlResponse response;
+    response.setCompleted(
+        session,
+        3,
+        1920,
+        1080,
+        7680,
+        7,
+        638895345678901234LL);
+    QByteArray encodedResponse;
+    check(ArgusWorker::StreamControlCodec::encodeResponse(
+              response,
+              encodedResponse)
+              == ArgusWorker::StreamControlCodecStatus::Accepted,
+          "Completed stream response must encode");
+    QByteArray expectedResponse;
+    appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, 4);
+    expectedResponse.append(encodeSession(session));
+    appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, 3);
+    appendInt32(expectedResponse, 1920);
+    appendInt32(expectedResponse, 1080);
+    appendInt32(expectedResponse, 7680);
+    appendInt32(expectedResponse, 0);
+    appendInt64(expectedResponse, 7);
+    appendInt64(expectedResponse, 638895345678901234LL);
+    appendInt32(expectedResponse, 1);
+    check(encodedResponse == expectedResponse,
+          "Native stream response must match the managed byte contract");
 }
 
 QByteArray encodePairingRequest(
@@ -824,6 +931,99 @@ void checkIdentityPackageAndInstall()
 }
 
 #if defined(Q_OS_WIN)
+void checkFrameSlotWriter()
+{
+    const ArgusWorker::StartupSession session = fixtureSession();
+    const QString suffix = QString::number(GetCurrentProcessId());
+    const QString mapName =
+        QStringLiteral("Local\\Argus.Stream.Frame.native-") + suffix;
+    const QString mutexName =
+        QStringLiteral("Local\\Argus.Stream.FrameLock.native-") + suffix;
+    HANDLE mutex = CreateMutexW(
+        nullptr,
+        FALSE,
+        reinterpret_cast<LPCWSTR>(mutexName.utf16()));
+    HANDLE mapping = CreateFileMappingW(
+        INVALID_HANDLE_VALUE,
+        nullptr,
+        PAGE_READWRITE,
+        0,
+        144 + 16,
+        reinterpret_cast<LPCWSTR>(mapName.utf16()));
+    unsigned char* view = static_cast<unsigned char*>(MapViewOfFile(
+        mapping,
+        FILE_MAP_ALL_ACCESS,
+        0,
+        0,
+        144 + 16));
+    check(mutex != nullptr && mapping != nullptr && view != nullptr,
+          "Native frame-slot fixture must create task-owned handles");
+    if (mutex == nullptr || mapping == nullptr || view == nullptr) {
+        if (view != nullptr) UnmapViewOfFile(view);
+        if (mapping != nullptr) CloseHandle(mapping);
+        if (mutex != nullptr) CloseHandle(mutex);
+        return;
+    }
+
+    std::memset(view, 0, 144 + 16);
+    std::memcpy(view, "ARGFRM02", 8);
+    const auto writeInt32 = [view](int offset, qint32 value) {
+        const qint32 littleEndian = qToLittleEndian(value);
+        std::memcpy(view + offset, &littleEndian, sizeof(littleEndian));
+    };
+    writeInt32(8, 2);
+    std::memcpy(view + 24, session.machineId.data(), 16);
+    std::memcpy(view + 40, session.attemptId.data(), 16);
+    std::memcpy(view + 56, session.sessionId.data(), 16);
+
+    ArgusWorker::StartupFrameSlotDescriptor descriptor;
+    descriptor.mapName = mapName;
+    descriptor.mutexName = mutexName;
+    descriptor.protocolVersion = 2;
+    descriptor.maxWidth = 2;
+    descriptor.maxHeight = 2;
+    descriptor.maxPayloadBytes = 16;
+    ArgusWorker::FrameSlotWriter writer;
+    check(writer.open(descriptor, session)
+              == ArgusWorker::FrameSlotWriterStatus::Opened,
+          "Native writer must open the managed-compatible slot");
+    const QByteArray pixels(16, '\x4a');
+    check(writer.publish(
+              1,
+              638895345678901234LL,
+              2,
+              2,
+              8,
+              pixels)
+              == ArgusWorker::FrameSlotPublishStatus::Published,
+          "Native writer must publish a bounded BGRA frame");
+    qint32 state;
+    qint64 timestamp;
+    std::memcpy(&state, view + 12, sizeof(state));
+    std::memcpy(&timestamp, view + 80, sizeof(timestamp));
+    state = qFromLittleEndian(state);
+    timestamp = qFromLittleEndian(timestamp);
+    check(state == 2
+              && timestamp == 638895345678901234LL
+              && std::memcmp(view + 144, pixels.constData(), 16) == 0,
+          "Native writer layout must match managed frame-slot v2");
+    check(writer.publish(
+              1,
+              638895345678901235LL,
+              2,
+              2,
+              8,
+              pixels)
+              == ArgusWorker::FrameSlotPublishStatus::OutOfOrder,
+          "Native writer must reject stale sequence values");
+    writer.close();
+
+    SecureZeroMemory(view + 144, 16);
+    UnmapViewOfFile(view);
+    CloseHandle(mapping);
+    CloseHandle(mutex);
+}
+
 void checkChannelTimeoutAndReuse()
 {
     const QString pipeName =
@@ -935,6 +1135,20 @@ PairingControlOutcome executePairingControl(
     return PairingControlOutcome::Rejected;
 }
 
+StreamControlOutcome executeStreamControl(
+    const QString&,
+    const StartupFrameSlotDescriptor&,
+    StreamControlRequest& request,
+    StreamControlResponse& response)
+{
+    response.setOutcome(
+        request.session(),
+        StreamControlOutcome::Rejected,
+        true);
+    request.clear();
+    return StreamControlOutcome::Rejected;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -955,12 +1169,30 @@ int main(int argc, char* argv[])
     check(!selectsWorker(
               {"Moonlight.exe", "--argus-worker=true", "--protocol", "1"}),
           "Only the exact Argus worker flag may select worker mode");
+    qputenv(ArgusWorker::StartupPipeEnvironmentVariable,
+            "Argus.Stream.Startup.test-invalid-controls");
+    check(ArgusWorker::runStartup(
+              {"Moonlight.exe",
+               "--argus-worker",
+               "--protocol",
+               "1",
+               "--pairing-control",
+               "--stream-control"})
+              == ArgusWorker::ExitInvalidArguments,
+          "Pairing and streaming control modes must be mutually exclusive");
+    check(qEnvironmentVariableIsEmpty(
+              ArgusWorker::StartupPipeEnvironmentVariable),
+          "Invalid control mode must still remove the inherited capability");
 
     checkManagedCodecFixture();
     checkCodecFailures();
     checkPairingControlCodec();
+    checkStreamControlCodec();
+    check(!ArgusWorker::isStreamInputIsolationSupported(),
+          "Argus streaming must remain fail-closed while upstream input is unconditional");
 
 #if defined(Q_OS_WIN)
+    checkFrameSlotWriter();
     checkChannelTimeoutAndReuse();
     checkExpiredDeadlineDrain();
 #endif

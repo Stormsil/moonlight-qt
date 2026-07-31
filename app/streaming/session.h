@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include <QAtomicInteger>
 #include <QQuickWindow>
 
 #include <Limelight.h>
@@ -98,10 +99,20 @@ class Session : public QObject
     friend class AsyncConnectionStartThread;
 
 public:
+    enum class ArgusHeadlessOutcome {
+        FirstFrame,
+        ConnectFailed,
+        DecodeTimedOut,
+        Terminated,
+    };
+
     explicit Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences = nullptr);
     virtual ~Session();
 
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
+    bool initializeArgusHeadless();
+    ArgusHeadlessOutcome runArgusHeadless(
+        int firstFrameTimeoutMilliseconds);
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
     Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
@@ -283,6 +294,9 @@ private:
     Overlay::OverlayManager m_OverlayManager;
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
+    static CONNECTION_LISTENER_CALLBACKS k_ArgusConnCallbacks;
     static Session* s_ActiveSession;
     static QSemaphore s_ActiveSessionSemaphore;
+    bool m_ArgusHeadless;
+    QAtomicInteger<int> m_ArgusTerminationCode;
 };

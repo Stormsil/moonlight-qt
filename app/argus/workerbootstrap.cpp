@@ -2,6 +2,7 @@
 #include "pairingclient.h"
 #include "pairingidentitypackage.h"
 #include "startupchannel.h"
+#include "streamclient.h"
 
 #include <QCoreApplication>
 #include <QScopeGuard>
@@ -18,6 +19,7 @@ struct ParsedArguments
 {
     bool valid = false;
     bool pairingControl = false;
+    bool streamControl = false;
 };
 
 ParsedArguments parseArguments(const QStringList& arguments)
@@ -25,6 +27,7 @@ ParsedArguments parseArguments(const QStringList& arguments)
     bool workerMode = false;
     bool protocolSet = false;
     bool pairingControl = false;
+    bool streamControl = false;
     QString protocol;
 
     for (int index = 1; index < arguments.size(); index++) {
@@ -42,14 +45,22 @@ ParsedArguments parseArguments(const QStringList& arguments)
                  && !pairingControl) {
             pairingControl = true;
         }
+        else if (argument == "--stream-control"
+                 && !streamControl) {
+            streamControl = true;
+        }
         else {
             return {};
         }
     }
 
     return {
-        workerMode && protocolSet && protocol == "1",
+        workerMode
+            && protocolSet
+            && protocol == "1"
+            && !(pairingControl && streamControl),
         pairingControl,
+        streamControl,
     };
 }
 
@@ -82,6 +93,15 @@ bool isRequested(int argc, char* argv[])
         }
     }
 
+    return false;
+}
+
+bool isStreamInputIsolationSupported()
+{
+    // moonlight-common-c currently starts its input stream and sends two
+    // mouse-wiggle packets unconditionally from LiStartConnection(). Keep the
+    // Argus route fail-closed until the pinned upstream stack exposes an
+    // explicit no-input connection capability.
     return false;
 }
 
@@ -130,6 +150,7 @@ int runStartup(const QStringList& arguments)
     }
 
     QString endpoint = payload.endpoint();
+    const StartupFrameSlotDescriptor frameSlot = payload.frameSlot();
     const StartupSession session = payload.session();
     QString identityFormat = payload.identityFormat();
     IdentityManager::ProcessIdentity identity;
@@ -159,10 +180,49 @@ int runStartup(const QStringList& arguments)
         endpoint.clear();
         return ExitHandshakeUnavailable;
     }
-    if (!parsed.pairingControl) {
+    if (!parsed.pairingControl && !parsed.streamControl) {
         endpoint.fill(QChar('\0'));
         endpoint.clear();
         return ExitSuccess;
+    }
+
+    if (parsed.streamControl) {
+        StreamControlRequest request;
+        if (channel.receiveStreamRequest(session, request)
+                != StartupChannelStatus::Accepted) {
+            endpoint.fill(QChar('\0'));
+            endpoint.clear();
+            return ExitHandshakeUnavailable;
+        }
+        StreamControlResponse response;
+        if (!isStreamInputIsolationSupported()) {
+            response.setOutcome(
+                session,
+                StreamControlOutcome::Rejected,
+                true);
+            endpoint.fill(QChar('\0'));
+            endpoint.clear();
+            if (channel.sendStreamResponse(response)
+                    != StartupChannelStatus::Accepted) {
+                return ExitHandshakeUnavailable;
+            }
+            return ExitStreamRejected;
+        }
+        const StreamControlOutcome streamOutcome =
+            executeStreamControl(
+                endpoint,
+                frameSlot,
+                request,
+                response);
+        endpoint.fill(QChar('\0'));
+        endpoint.clear();
+        if (channel.sendStreamResponse(response)
+                != StartupChannelStatus::Accepted) {
+            return ExitHandshakeUnavailable;
+        }
+        return streamOutcome == StreamControlOutcome::Completed
+            ? ExitSuccess
+            : ExitStreamRejected;
     }
 
     PairingControlRequest request;

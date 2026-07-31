@@ -207,6 +207,116 @@ public:
         QByteArray& packet);
 };
 
+enum class StreamVideoCodec
+{
+    H264 = 1,
+};
+
+class StreamControlRequest
+{
+public:
+    StreamControlRequest() = default;
+    StreamControlRequest(const StreamControlRequest&) = delete;
+    StreamControlRequest& operator=(const StreamControlRequest&) = delete;
+    ~StreamControlRequest();
+
+    const StartupSession& session() const;
+    const QString& endpoint() const;
+    const QByteArray& serverCertificate() const;
+    qint32 appId() const;
+    StreamVideoCodec codec() const;
+    qint32 width() const;
+    qint32 height() const;
+    qint32 framesPerSecond() const;
+    qint32 firstFrameTimeoutMilliseconds() const;
+    const StartupFrameSlotDescriptor& frameSlot() const;
+    void clear();
+
+private:
+    StartupSession m_session;
+    QString m_endpoint;
+    QByteArray m_serverCertificate;
+    qint32 m_appId = 0;
+    StreamVideoCodec m_codec = StreamVideoCodec::H264;
+    qint32 m_width = 0;
+    qint32 m_height = 0;
+    qint32 m_framesPerSecond = 0;
+    qint32 m_firstFrameTimeoutMilliseconds = 0;
+    StartupFrameSlotDescriptor m_frameSlot;
+
+    friend class StreamControlCodec;
+};
+
+enum class StreamControlCodecStatus
+{
+    Accepted,
+    PacketOutOfBounds,
+    InvalidPacket,
+    SessionMismatch,
+    NonceMismatch,
+};
+
+enum class StreamControlOutcome
+{
+    Completed = 1,
+    Unavailable = 2,
+    Rejected = 3,
+    DecodeTimedOut = 4,
+};
+
+class StreamControlResponse
+{
+public:
+    const StartupSession& session() const;
+    StreamControlOutcome outcome() const;
+    qint32 frameCount() const;
+    qint32 width() const;
+    qint32 height() const;
+    qint32 stride() const;
+    qint64 sequence() const;
+    qint64 timestampUtcTicks() const;
+    bool disconnectClean() const;
+
+    void setCompleted(
+        const StartupSession& session,
+        qint32 frameCount,
+        qint32 width,
+        qint32 height,
+        qint32 stride,
+        qint64 sequence,
+        qint64 timestampUtcTicks);
+    void setOutcome(
+        const StartupSession& session,
+        StreamControlOutcome outcome,
+        bool disconnectClean);
+    void clear();
+
+private:
+    StartupSession m_session;
+    StreamControlOutcome m_outcome = StreamControlOutcome::Rejected;
+    qint32 m_frameCount = 0;
+    qint32 m_width = 0;
+    qint32 m_height = 0;
+    qint32 m_stride = 0;
+    qint64 m_sequence = 0;
+    qint64 m_timestampUtcTicks = 0;
+    bool m_disconnectClean = false;
+};
+
+class StreamControlCodec
+{
+public:
+    static StreamControlCodecStatus decodeRequest(
+        const QByteArray& packet,
+        const StartupSession& expectedSession,
+        const QByteArray& expectedNonce,
+        StreamControlRequest& request);
+
+    static StreamControlCodecStatus encodeResponse(
+        const StreamControlResponse& response,
+        QByteArray& packet);
+};
+
 enum class StartupChannelStatus
 {
     Accepted,
@@ -241,10 +351,20 @@ public:
     StartupChannelStatus sendPairingResponse(
         const PairingControlResponse& response);
 
+    StartupChannelStatus receiveStreamRequest(
+        const StartupSession& expectedSession,
+        StreamControlRequest& request);
+
+    StartupChannelStatus sendStreamResponse(
+        const StreamControlResponse& response);
+
 private:
     bool m_used = false;
     bool m_pairingUsed = false;
     bool m_pairingResponsePending = false;
+    bool m_streamUsed = false;
+    bool m_streamResponsePending = false;
+    QByteArray m_channelNonce;
     void* m_pipeHandle = nullptr;
 };
 

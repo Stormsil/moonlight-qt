@@ -9,6 +9,7 @@ INCLUDEPATH += ../../app
 
 SOURCES += \
     main.cpp \
+    ../../app/argus/frameslotwriter.cpp \
     ../../app/argus/pairingendpoint.cpp \
     ../../app/argus/pairingidentitypackage.cpp \
     ../../app/argus/startupchannel.cpp \
@@ -17,6 +18,7 @@ SOURCES += \
     ../../app/backend/nvaddress.cpp
 
 HEADERS += \
+    ../../app/argus/frameslotwriter.h \
     ../../app/argus/pairingidentitypackage.h \
     ../../app/argus/pairingendpoint.h \
     ../../app/argus/startupchannel.h \

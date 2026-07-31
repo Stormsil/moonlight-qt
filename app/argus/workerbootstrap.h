@@ -14,9 +14,11 @@ enum ExitCode {
     ExitStartupCapabilityUnavailable = 78,
     ExitHandshakeUnavailable = 79,
     ExitPairingRejected = 80,
+    ExitStreamRejected = 81,
 };
 
 bool isRequested(int argc, char* argv[]);
+bool isStreamInputIsolationSupported();
 
 int run(int argc, char* argv[]);
 int runStartup(const QStringList& arguments);

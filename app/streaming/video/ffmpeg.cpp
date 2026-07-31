@@ -1,5 +1,6 @@
 #include <Limelight.h>
 #include "ffmpeg.h"
+#include "argus/decodedframesink.h"
 #include "utils.h"
 #include "streaming/session.h"
 
@@ -1969,6 +1970,11 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     }
 
                     m_ActiveWndVideoStats.decodedFrames++;
+
+                    // The Argus sink is absent for every ordinary interactive
+                    // and CLI stream. In explicit worker mode it observes the
+                    // already-decoded frame without owning a second decoder.
+                    ArgusWorker::publishDecodedFrame(frame);
 
                     // Queue the frame for rendering (or render now if pacer is disabled)
                     m_Pacer->submitFrame(frame);

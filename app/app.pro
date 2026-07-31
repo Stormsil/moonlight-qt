@@ -166,10 +166,13 @@ macx {
 }
 
 SOURCES += \
+    argus/decodedframesink.cpp \
+    argus/frameslotwriter.cpp \
     argus/pairingclient.cpp \
     argus/pairingendpoint.cpp \
     argus/pairingidentitypackage.cpp \
     argus/startupchannel.cpp \
+    argus/streamclient.cpp \
     argus/workerbootstrap.cpp \
     backend/nvaddress.cpp \
     backend/nvapp.cpp \
@@ -212,10 +215,13 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
+    argus/decodedframesink.h \
+    argus/frameslotwriter.h \
     argus/pairingclient.h \
     argus/pairingendpoint.h \
     argus/pairingidentitypackage.h \
     argus/startupchannel.h \
+    argus/streamclient.h \
     argus/workerbootstrap.h \
     SDL_compat.h \
     backend/nvaddress.h \
