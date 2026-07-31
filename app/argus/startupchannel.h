@@ -69,6 +69,7 @@ public:
     const QString& endpoint() const;
     const QString& identityFormat() const;
     const QByteArray& identity() const;
+    QByteArray takeIdentity();
     const StartupFrameSlotDescriptor& frameSlot() const;
 
     void clear();

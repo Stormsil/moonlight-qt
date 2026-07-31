@@ -166,6 +166,7 @@ macx {
 }
 
 SOURCES += \
+    argus/pairingidentitypackage.cpp \
     argus/startupchannel.cpp \
     argus/workerbootstrap.cpp \
     backend/nvaddress.cpp \
@@ -209,6 +210,7 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
+    argus/pairingidentitypackage.h \
     argus/startupchannel.h \
     argus/workerbootstrap.h \
     SDL_compat.h \

@@ -7,12 +7,262 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <utility>
 
 #define SER_UNIQUEID "uniqueid"
 #define SER_CERT "certificate"
 #define SER_KEY "key"
 
 IdentityManager* IdentityManager::s_Im = nullptr;
+IdentityManager::ProcessIdentity*
+    IdentityManager::s_ProcessIdentity = nullptr;
+bool IdentityManager::s_ProcessIdentityInstallAttempted = false;
+
+namespace
+{
+
+void clearByteArray(QByteArray& value)
+{
+    if (!value.isEmpty()) {
+        OPENSSL_cleanse(value.data(), value.size());
+    }
+    value.clear();
+}
+
+bool isCanonicalUniqueId(const QString& uniqueId)
+{
+    if (uniqueId.size() < 1 || uniqueId.size() > 16) {
+        return false;
+    }
+
+    return std::all_of(
+        uniqueId.cbegin(),
+        uniqueId.cend(),
+        [](QChar value) {
+            const ushort character = value.unicode();
+            return (character >= '0' && character <= '9')
+                || (character >= 'a' && character <= 'f');
+        });
+}
+
+bool remainingBioIsWhitespace(BIO* bio)
+{
+    char buffer[256];
+    int length;
+    while ((length = BIO_read(
+                bio,
+                buffer,
+                sizeof(buffer))) > 0) {
+        for (int index = 0; index < length; index++) {
+            if (!std::isspace(
+                    static_cast<unsigned char>(buffer[index]))) {
+                return false;
+            }
+        }
+    }
+
+    return length == 0;
+}
+
+template<std::size_t Size>
+bool startsWithLiteral(
+    const QByteArray& value,
+    int offset,
+    const char (&prefix)[Size])
+{
+    constexpr int prefixLength = static_cast<int>(Size) - 1;
+    return offset <= value.size() - prefixLength
+        && std::equal(
+            prefix,
+            prefix + prefixLength,
+            value.constData() + offset);
+}
+
+int firstNonWhitespaceOffset(const QByteArray& value)
+{
+    int offset = 0;
+    while (offset < value.size()
+            && std::isspace(
+                static_cast<unsigned char>(value[offset]))) {
+        offset++;
+    }
+
+    return offset;
+}
+
+bool hasSupportedCertificatePrefix(const QByteArray& value)
+{
+    const int offset = firstNonWhitespaceOffset(value);
+    return startsWithLiteral(
+        value,
+        offset,
+        "-----BEGIN CERTIFICATE-----");
+}
+
+bool hasSupportedPrivateKeyPrefix(const QByteArray& value)
+{
+    const int offset = firstNonWhitespaceOffset(value);
+    return startsWithLiteral(
+               value,
+               offset,
+               "-----BEGIN PRIVATE KEY-----")
+        || startsWithLiteral(
+               value,
+               offset,
+               "-----BEGIN RSA PRIVATE KEY-----");
+}
+
+bool isValidRsaIdentity(
+    const QByteArray& certificatePem,
+    const QByteArray& privateKeyPem)
+{
+    if (certificatePem.isEmpty()
+            || privateKeyPem.isEmpty()
+            || !hasSupportedCertificatePrefix(certificatePem)
+            || !hasSupportedPrivateKeyPrefix(privateKeyPem)) {
+        return false;
+    }
+
+    QSslCertificate sslCertificate(
+        certificatePem,
+        QSsl::Pem);
+    QSslKey sslKey(
+        privateKeyPem,
+        QSsl::Rsa,
+        QSsl::Pem,
+        QSsl::PrivateKey);
+    if (sslCertificate.isNull() || sslKey.isNull()) {
+        return false;
+    }
+
+    BIO* certificateBio = BIO_new_mem_buf(
+        certificatePem.constData(),
+        certificatePem.size());
+    BIO* privateKeyBio = BIO_new_mem_buf(
+        privateKeyPem.constData(),
+        privateKeyPem.size());
+    if (certificateBio == nullptr || privateKeyBio == nullptr) {
+        BIO_free(certificateBio);
+        BIO_free(privateKeyBio);
+        return false;
+    }
+
+    X509* certificate = PEM_read_bio_X509(
+        certificateBio,
+        nullptr,
+        nullptr,
+        nullptr);
+    EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(
+        privateKeyBio,
+        nullptr,
+        nullptr,
+        nullptr);
+    EVP_PKEY* certificateKey = certificate == nullptr
+        ? nullptr
+        : X509_get_pubkey(certificate);
+    bool valid = certificate != nullptr
+        && privateKey != nullptr
+        && certificateKey != nullptr
+        && remainingBioIsWhitespace(certificateBio)
+        && remainingBioIsWhitespace(privateKeyBio);
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    valid = valid
+        && EVP_PKEY_is_a(certificateKey, "RSA") == 1
+        && EVP_PKEY_is_a(privateKey, "RSA") == 1
+        && EVP_PKEY_eq(certificateKey, privateKey) == 1;
+#else
+    valid = valid
+        && EVP_PKEY_base_id(certificateKey) == EVP_PKEY_RSA
+        && EVP_PKEY_base_id(privateKey) == EVP_PKEY_RSA
+        && EVP_PKEY_cmp(certificateKey, privateKey) == 1;
+#endif
+
+    EVP_PKEY_free(certificateKey);
+    EVP_PKEY_free(privateKey);
+    X509_free(certificate);
+    BIO_free(certificateBio);
+    BIO_free(privateKeyBio);
+    return valid;
+}
+
+}
+
+IdentityManager::ProcessIdentity::ProcessIdentity(
+    QString uniqueId,
+    QByteArray certificatePem,
+    QByteArray privateKeyPem)
+    : m_UniqueId(std::move(uniqueId)),
+      m_CertificatePem(std::move(certificatePem)),
+      m_PrivateKeyPem(std::move(privateKeyPem))
+{
+}
+
+IdentityManager::ProcessIdentity::ProcessIdentity(
+    ProcessIdentity&& other) noexcept
+    : m_UniqueId(std::move(other.m_UniqueId)),
+      m_CertificatePem(std::move(other.m_CertificatePem)),
+      m_PrivateKeyPem(std::move(other.m_PrivateKeyPem))
+{
+    other.clear();
+}
+
+IdentityManager::ProcessIdentity&
+IdentityManager::ProcessIdentity::operator=(
+    ProcessIdentity&& other) noexcept
+{
+    if (this != &other) {
+        clear();
+        m_UniqueId = std::move(other.m_UniqueId);
+        m_CertificatePem = std::move(other.m_CertificatePem);
+        m_PrivateKeyPem = std::move(other.m_PrivateKeyPem);
+        other.clear();
+    }
+    return *this;
+}
+
+IdentityManager::ProcessIdentity::~ProcessIdentity()
+{
+    clear();
+}
+
+const QString&
+IdentityManager::ProcessIdentity::uniqueId() const
+{
+    return m_UniqueId;
+}
+
+const QByteArray&
+IdentityManager::ProcessIdentity::certificatePem() const
+{
+    return m_CertificatePem;
+}
+
+const QByteArray&
+IdentityManager::ProcessIdentity::privateKeyPem() const
+{
+    return m_PrivateKeyPem;
+}
+
+bool IdentityManager::ProcessIdentity::isValid() const
+{
+    return isCanonicalUniqueId(m_UniqueId)
+        && isValidRsaIdentity(
+            m_CertificatePem,
+            m_PrivateKeyPem);
+}
+
+void IdentityManager::ProcessIdentity::clear()
+{
+    m_UniqueId.fill(QChar('\0'));
+    m_UniqueId.clear();
+    clearByteArray(m_CertificatePem);
+    clearByteArray(m_PrivateKeyPem);
+}
 
 IdentityManager*
 IdentityManager::get()
@@ -20,10 +270,38 @@ IdentityManager::get()
     // This will always be called first on the main thread,
     // so it's safe to initialize without locks.
     if (s_Im == nullptr) {
-        s_Im = new IdentityManager();
+        if (s_ProcessIdentity != nullptr) {
+            s_Im = new IdentityManager(
+                std::move(*s_ProcessIdentity));
+            delete s_ProcessIdentity;
+            s_ProcessIdentity = nullptr;
+        }
+        else {
+            s_Im = new IdentityManager();
+        }
     }
 
     return s_Im;
+}
+
+IdentityManager::ProcessIdentityInstallResult
+IdentityManager::installProcessIdentity(ProcessIdentity&& identity)
+{
+    if (s_Im != nullptr) {
+        return ProcessIdentityInstallResult::AlreadyInitialized;
+    }
+    if (s_ProcessIdentityInstallAttempted) {
+        return ProcessIdentityInstallResult::AlreadyInstalled;
+    }
+
+    s_ProcessIdentityInstallAttempted = true;
+    if (!identity.isValid()) {
+        return ProcessIdentityInstallResult::InvalidIdentity;
+    }
+
+    s_ProcessIdentity =
+        new ProcessIdentity(std::move(identity));
+    return ProcessIdentityInstallResult::Installed;
 }
 
 void IdentityManager::createCredentials(QSettings& settings)
@@ -149,6 +427,17 @@ IdentityManager::IdentityManager()
 
         settings.setValue(SER_UNIQUEID, m_CachedUniqueId);
     }
+}
+
+IdentityManager::IdentityManager(ProcessIdentity&& identity)
+    : m_CachedPrivateKey(
+          std::move(identity.m_PrivateKeyPem)),
+      m_CachedPemCert(
+          std::move(identity.m_CertificatePem)),
+      m_CachedUniqueId(
+          std::move(identity.m_UniqueId))
+{
+    identity.clear();
 }
 
 QSslCertificate

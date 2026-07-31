@@ -1,4 +1,5 @@
 #include "workerbootstrap.h"
+#include "pairingidentitypackage.h"
 #include "startupchannel.h"
 
 #include <QCoreApplication>
@@ -94,7 +95,33 @@ int runStartup(const QStringList& arguments)
     const StartupChannelStatus status =
         channel.receive(pipeName, payload);
     pipeName.fill(QChar('\0'));
-    return status == StartupChannelStatus::Accepted
+    if (status != StartupChannelStatus::Accepted) {
+        return ExitHandshakeUnavailable;
+    }
+
+    QString identityFormat = payload.identityFormat();
+    IdentityManager::ProcessIdentity identity;
+    const PairingIdentityPackageStatus packageStatus =
+        PairingIdentityPackage::decode(
+            identityFormat,
+            payload.takeIdentity(),
+            identity);
+    identityFormat.fill(QChar('\0'));
+    identityFormat.clear();
+    payload.clear();
+    if (packageStatus != PairingIdentityPackageStatus::Accepted
+            || IdentityManager::installProcessIdentity(
+                std::move(identity))
+                != IdentityManager::ProcessIdentityInstallResult::Installed) {
+        return ExitHandshakeUnavailable;
+    }
+
+    IdentityManager* manager = IdentityManager::get();
+    const QSslConfiguration sslConfiguration =
+        manager->getSslConfig();
+    return !manager->getUniqueId().isEmpty()
+            && !sslConfiguration.localCertificate().isNull()
+            && !sslConfiguration.privateKey().isNull()
         ? ExitSuccess
         : ExitHandshakeUnavailable;
 }

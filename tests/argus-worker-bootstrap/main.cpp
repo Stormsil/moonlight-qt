@@ -1,10 +1,21 @@
 #include "argus/workerbootstrap.h"
 #include "argus/startupchannel.h"
+#include "argus/pairingidentitypackage.h"
+#include "backend/identitymanager.h"
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QFile>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QtEndian>
 
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -52,6 +63,14 @@ void appendInt32(QByteArray& bytes, qint32 value)
         sizeof(littleEndian));
 }
 
+void appendUInt16(QByteArray& bytes, quint16 value)
+{
+    const quint16 littleEndian = qToLittleEndian(value);
+    bytes.append(
+        reinterpret_cast<const char*>(&littleEndian),
+        sizeof(littleEndian));
+}
+
 void appendInt64(QByteArray& bytes, qint64 value)
 {
     const qint64 littleEndian = qToLittleEndian(value);
@@ -64,6 +83,130 @@ void appendText(QByteArray& bytes, const QByteArray& text)
 {
     appendInt32(bytes, text.size());
     bytes.append(text);
+}
+
+void appendIdentityField(
+    QByteArray& package,
+    quint16 type,
+    const QByteArray& value)
+{
+    appendUInt16(package, type);
+    appendInt32(package, value.size());
+    package.append(value);
+}
+
+class TestIdentity
+{
+public:
+    TestIdentity() = default;
+    TestIdentity(const TestIdentity&) = delete;
+    TestIdentity& operator=(const TestIdentity&) = delete;
+    TestIdentity(TestIdentity&&) = default;
+    TestIdentity& operator=(TestIdentity&&) = default;
+
+    ~TestIdentity()
+    {
+        ArgusWorker::secureZero(
+            certificatePem.data(),
+            certificatePem.size());
+        ArgusWorker::secureZero(
+            privateKeyPem.data(),
+            privateKeyPem.size());
+    }
+
+    QByteArray certificatePem;
+    QByteArray privateKeyPem;
+};
+
+TestIdentity createTestIdentity()
+{
+    TestIdentity identity;
+    X509* certificate = X509_new();
+    EVP_PKEY* key = EVP_RSA_gen(2048);
+    if (certificate == nullptr || key == nullptr) {
+        X509_free(certificate);
+        EVP_PKEY_free(key);
+        return identity;
+    }
+
+    X509_set_version(certificate, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(certificate), 577);
+    X509_gmtime_adj(X509_getm_notBefore(certificate), -60);
+    X509_gmtime_adj(
+        X509_getm_notAfter(certificate),
+        60 * 60 * 24);
+    X509_set_pubkey(certificate, key);
+    X509_NAME* name = X509_NAME_new();
+    if (name != nullptr) {
+        constexpr char CommonName[] = "Argus issue 577 test identity";
+        X509_NAME_add_entry_by_txt(
+            name,
+            "CN",
+            MBSTRING_ASC,
+            reinterpret_cast<const unsigned char*>(CommonName),
+            -1,
+            -1,
+            0);
+        X509_set_subject_name(certificate, name);
+        X509_set_issuer_name(certificate, name);
+        X509_NAME_free(name);
+    }
+
+    BIO* certificateBio = BIO_new(BIO_s_mem());
+    BIO* keyBio = BIO_new(BIO_s_mem());
+    if (name == nullptr
+            || certificateBio == nullptr
+            || keyBio == nullptr
+            || X509_sign(certificate, key, EVP_sha256()) <= 0
+            || PEM_write_bio_X509(certificateBio, certificate) != 1
+            || PEM_write_bio_PrivateKey(
+                keyBio,
+                key,
+                nullptr,
+                nullptr,
+                0,
+                nullptr,
+                nullptr) != 1) {
+        BIO_free(certificateBio);
+        BIO_free(keyBio);
+        X509_free(certificate);
+        EVP_PKEY_free(key);
+        return identity;
+    }
+
+    BUF_MEM* memory = nullptr;
+    BIO_get_mem_ptr(certificateBio, &memory);
+    identity.certificatePem =
+        QByteArray(memory->data, static_cast<int>(memory->length));
+    BIO_get_mem_ptr(keyBio, &memory);
+    identity.privateKeyPem =
+        QByteArray(memory->data, static_cast<int>(memory->length));
+
+    BIO_free(certificateBio);
+    BIO_free(keyBio);
+    X509_free(certificate);
+    EVP_PKEY_free(key);
+    return identity;
+}
+
+QByteArray encodeIdentityPackage(
+    const QByteArray& uniqueId,
+    const QByteArray& certificatePem,
+    const QByteArray& privateKeyPem,
+    qint32 version = 1,
+    quint16 firstFieldType = 1,
+    bool appendTrailingByte = false)
+{
+    QByteArray package("MLQTIDPK", 8);
+    appendInt32(package, version);
+    appendUInt16(package, 3);
+    appendIdentityField(package, firstFieldType, uniqueId);
+    appendIdentityField(package, 2, certificatePem);
+    appendIdentityField(package, 3, privateKeyPem);
+    if (appendTrailingByte) {
+        package.append('\0');
+    }
+    return package;
 }
 
 ArgusWorker::StartupSession fixtureSession()
@@ -309,6 +452,262 @@ void checkCodecFailures()
           "Frame-slot limits above v1 bounds must fail closed");
 }
 
+void checkIdentityPackageAndInstall()
+{
+    TestIdentity identity = createTestIdentity();
+    TestIdentity otherIdentity = createTestIdentity();
+    check(!identity.certificatePem.isEmpty()
+              && !identity.privateKeyPem.isEmpty()
+              && !otherIdentity.privateKeyPem.isEmpty(),
+          "Task-owned RSA identity fixtures must be generated");
+    if (identity.certificatePem.isEmpty()
+            || identity.privateKeyPem.isEmpty()
+            || otherIdentity.privateKeyPem.isEmpty()) {
+        return;
+    }
+
+    const QByteArray uniqueId("0123456789abcdef");
+    IdentityManager::ProcessIdentity decoded;
+    check(ArgusWorker::PairingIdentityPackage::decode(
+              ArgusWorker::PairingIdentityFormat,
+              encodeIdentityPackage(
+                  uniqueId,
+                  identity.certificatePem,
+                  identity.privateKeyPem),
+              decoded)
+              == ArgusWorker::PairingIdentityPackageStatus::Accepted,
+          "Canonical identity-v1 package must decode");
+    check(decoded.uniqueId() == QString::fromLatin1(uniqueId),
+          "Decoded identity must preserve the canonical unique ID");
+    check(decoded.certificatePem() == identity.certificatePem,
+          "Decoded identity must preserve the certificate PEM");
+    check(decoded.privateKeyPem() == identity.privateKeyPem,
+          "Decoded identity must preserve the private-key PEM");
+
+    const auto expectRejected = [](
+        const QString& format,
+        QByteArray package,
+        const char* message) {
+        IdentityManager::ProcessIdentity rejected;
+        check(ArgusWorker::PairingIdentityPackage::decode(
+                  format,
+                  std::move(package),
+                  rejected)
+                  != ArgusWorker::PairingIdentityPackageStatus::Accepted,
+              message);
+    };
+    expectRejected(
+        QStringLiteral("moonlight-qt"),
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            identity.privateKeyPem),
+        "Unsupported identity format must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            identity.privateKeyPem,
+            2),
+        "Unsupported identity package version must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            identity.privateKeyPem,
+            1,
+            2),
+        "Duplicate identity package field must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            QByteArray(),
+            identity.certificatePem,
+            identity.privateKeyPem),
+        "Empty identity package field must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            "ABCDEF",
+            identity.certificatePem,
+            identity.privateKeyPem),
+        "Noncanonical unique ID must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            QByteArray(17, 'a'),
+            identity.certificatePem,
+            identity.privateKeyPem),
+        "Unique ID above the Moonlight bound must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            "not-a-certificate",
+            identity.privateKeyPem),
+        "Malformed certificate PEM must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            QByteArray(1, static_cast<char>(0xff)),
+            identity.privateKeyPem),
+        "Malformed UTF-8 certificate bytes must fail closed");
+    QByteArray multipleCertificates =
+        identity.certificatePem + '\n' + identity.certificatePem;
+    QByteArray unsupportedAfterKey =
+        identity.privateKeyPem + '\n' + identity.certificatePem;
+    QByteArray trailingCertificateText =
+        identity.certificatePem + "\nnot-whitespace";
+    QByteArray nonAsciiWhitespace = identity.certificatePem;
+    nonAsciiWhitespace.append("\xc2\xa0", 2);
+    QByteArray prefixedCertificate =
+        "not-whitespace\n" + identity.certificatePem;
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            multipleCertificates,
+            identity.privateKeyPem),
+        "Multiple certificate PEM objects must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            unsupportedAfterKey),
+        "Unsupported PEM object after private key must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            trailingCertificateText,
+            identity.privateKeyPem),
+        "Non-whitespace certificate suffix must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            nonAsciiWhitespace,
+            identity.privateKeyPem),
+        "Non-ASCII certificate suffix must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            prefixedCertificate,
+            identity.privateKeyPem),
+        "Non-whitespace certificate prefix must fail closed");
+    multipleCertificates.fill('\0');
+    unsupportedAfterKey.fill('\0');
+    trailingCertificateText.fill('\0');
+    nonAsciiWhitespace.fill('\0');
+    prefixedCertificate.fill('\0');
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            otherIdentity.privateKeyPem),
+        "Certificate and private-key mismatch must fail closed");
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        encodeIdentityPackage(
+            uniqueId,
+            identity.certificatePem,
+            identity.privateKeyPem,
+            1,
+            1,
+            true),
+        "Trailing identity package bytes must fail closed");
+    QByteArray overflow = encodeIdentityPackage(
+        uniqueId,
+        identity.certificatePem,
+        identity.privateKeyPem);
+    const qint32 overflowLength = qToLittleEndian(
+        std::numeric_limits<qint32>::max());
+    std::memcpy(
+        overflow.data() + 16,
+        &overflowLength,
+        sizeof(overflowLength));
+    expectRejected(
+        ArgusWorker::PairingIdentityFormat,
+        std::move(overflow),
+        "Overflowing identity field length must fail closed");
+
+    QTemporaryDir settingsDirectory;
+    check(settingsDirectory.isValid(),
+          "Identity install test must own a temporary settings directory");
+    if (!settingsDirectory.isValid()) {
+        return;
+    }
+    QCoreApplication::setOrganizationName(
+        QStringLiteral("ArgusIssue577Tests"));
+    QCoreApplication::setApplicationName(
+        QStringLiteral("IdentityInstall"));
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(
+        QSettings::IniFormat,
+        QSettings::UserScope,
+        settingsDirectory.path());
+    QSettings::setPath(
+        QSettings::IniFormat,
+        QSettings::SystemScope,
+        settingsDirectory.path());
+    QString settingsFile;
+    {
+        QSettings settings;
+        settingsFile = settings.fileName();
+    }
+    QFile::remove(settingsFile);
+
+    check(IdentityManager::installProcessIdentity(std::move(decoded))
+              == IdentityManager::ProcessIdentityInstallResult::Installed,
+          "Validated identity must install before singleton initialization");
+    IdentityManager::ProcessIdentity second;
+    check(ArgusWorker::PairingIdentityPackage::decode(
+              ArgusWorker::PairingIdentityFormat,
+              encodeIdentityPackage(
+                  uniqueId,
+                  identity.certificatePem,
+                  identity.privateKeyPem),
+              second)
+              == ArgusWorker::PairingIdentityPackageStatus::Accepted,
+          "Second install fixture must decode");
+    check(IdentityManager::installProcessIdentity(std::move(second))
+              == IdentityManager::ProcessIdentityInstallResult::AlreadyInstalled,
+          "Second process-local identity install must be rejected");
+
+    IdentityManager* manager = IdentityManager::get();
+    check(manager->getUniqueId() == QString::fromLatin1(uniqueId),
+          "Existing unique-ID getter must return process-local identity");
+    check(manager->getCertificate() == identity.certificatePem,
+          "Existing certificate getter must return process-local identity");
+    check(manager->getPrivateKey() == identity.privateKeyPem,
+          "Existing private-key getter must return process-local identity");
+    check(!manager->getSslConfig().localCertificate().isNull()
+              && !manager->getSslConfig().privateKey().isNull(),
+          "Existing SSL config getter must use process-local identity");
+
+    IdentityManager::ProcessIdentity afterGet;
+    check(ArgusWorker::PairingIdentityPackage::decode(
+              ArgusWorker::PairingIdentityFormat,
+              encodeIdentityPackage(
+                  uniqueId,
+                  identity.certificatePem,
+                  identity.privateKeyPem),
+              afterGet)
+              == ArgusWorker::PairingIdentityPackageStatus::Accepted,
+          "Post-get install fixture must decode");
+    check(IdentityManager::installProcessIdentity(std::move(afterGet))
+              == IdentityManager::ProcessIdentityInstallResult::AlreadyInitialized,
+          "Identity install after singleton get must be rejected");
+    check(!QFile::exists(settingsFile),
+          "Process-local identity install must not read or write QSettings");
+}
+
 #if defined(Q_OS_WIN)
 void checkChannelTimeoutAndReuse()
 {
@@ -503,6 +902,8 @@ int main(int argc, char* argv[])
         server.join();
     }
 #endif
+
+    checkIdentityPackageAndInstall();
 
     return failures == 0 ? 0 : 1;
 }

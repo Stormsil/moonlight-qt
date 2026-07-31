@@ -1,4 +1,4 @@
-QT += core
+QT += core network
 CONFIG += console testcase c++17
 CONFIG -= app_bundle
 DEFINES += ARGUS_STARTUP_CHANNEL_TESTS
@@ -9,11 +9,24 @@ INCLUDEPATH += ../../app
 
 SOURCES += \
     main.cpp \
+    ../../app/argus/pairingidentitypackage.cpp \
     ../../app/argus/startupchannel.cpp \
-    ../../app/argus/workerbootstrap.cpp
+    ../../app/argus/workerbootstrap.cpp \
+    ../../app/backend/identitymanager.cpp
 
 HEADERS += \
+    ../../app/argus/pairingidentitypackage.h \
     ../../app/argus/startupchannel.h \
-    ../../app/argus/workerbootstrap.h
+    ../../app/argus/workerbootstrap.h \
+    ../../app/backend/identitymanager.h
 
-win32:LIBS += kernel32.lib
+win32 {
+    INCLUDEPATH += \
+        $$PWD/../../libs/windows/include \
+        $$PWD/../../libs/windows/include/x64
+    LIBS += \
+        -L$$PWD/../../libs/windows/lib/x64 \
+        -llibssl \
+        -llibcrypto \
+        kernel32.lib
+}

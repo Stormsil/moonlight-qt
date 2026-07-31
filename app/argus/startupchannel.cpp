@@ -756,6 +756,11 @@ const QByteArray& StartupPayload::identity() const
     return m_identity;
 }
 
+QByteArray StartupPayload::takeIdentity()
+{
+    return std::move(m_identity);
+}
+
 const StartupFrameSlotDescriptor&
 StartupPayload::frameSlot() const
 {

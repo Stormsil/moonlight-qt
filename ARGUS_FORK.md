@@ -48,11 +48,26 @@ channel is single-use, has one overall I/O deadline, performs no retry or
 downgrade, rejects malformed/truncated/trailing/out-of-bounds packets, and
 zeroes temporary packet, nonce, endpoint, identity, and capability buffers.
 
-The accepted identity remains only in a zeroizing typed in-memory payload. It
-is not persisted or installed into `IdentityManager`: the managed
-`moonlight-qt` identity format does not yet define how its opaque bytes encode
-Moonlight's certificate PEM, private-key PEM, and unique ID. Ordinary pairing
-and `QSettings` identity ownership are therefore unchanged.
+The only supported identity format is `moonlight-qt.identity-v1`. Its package
+is bounded to 256 KiB and uses this canonical little-endian layout:
+
+- 8 bytes ASCII magic `MLQTIDPK`;
+- `int32` version `1`, then `uint16` field count `3`;
+- field `uint16 1` + `int32` length + 1..16 lowercase hexadecimal unique-ID
+  bytes;
+- field `uint16 2` + `int32` length + certificate PEM bytes;
+- field `uint16 3` + `int32` length + private-key PEM bytes.
+
+The decoder rejects unsupported format/version, reordered or duplicate fields,
+empty/overflowing/out-of-bounds fields, trailing bytes, noncanonical IDs,
+malformed or non-RSA PEM, multiple/unsupported/trailing PEM objects, and
+certificate/private-key mismatch. Each field contains exactly one supported
+PEM object with only surrounding whitespace. Accepted material moves into the
+existing `IdentityManager` through a one-shot process-local install before its
+first `get()`. The existing getters and SSL configuration then use that
+material. This path never constructs `QSettings`;
+second and post-`get()` installs fail closed. Ordinary pairing and the normal
+lazy `QSettings` identity constructor are unchanged.
 
 The focused bootstrap test is built and run with:
 
@@ -66,10 +81,13 @@ Pop-Location
 ```
 
 The managed Bot-Mox harness additionally launches the built `Moonlight.exe` as
-the real child. It proves a valid payload is accepted, wrong PID and exact
-creation-time receipts are rejected by the managed server, the worker exits
-nonzero on rejection, and stdout/stderr remain empty. This is startup-channel
-interop evidence only, not a production readiness or streaming receipt.
+the real child with runtime-generated task-owned RSA credentials. It proves a
+valid package reaches `IdentityManager`, wrong PID and exact creation-time
+receipts are rejected by the managed server, and wrong format, malformed
+package, and mismatched keys fail closed in the child. Stdout/stderr remain
+empty and task-owned working directories remain clean. This is startup and
+identity-ingestion evidence only, not a production readiness or streaming
+receipt.
 
 ## Reuse seams
 
@@ -82,8 +100,8 @@ interop evidence only, not a production readiness or streaming receipt.
 
 ## Remaining gates
 
-This spike is not release-ready. It still requires a versioned protected
-identity encoding and integration with the existing Moonlight identity owner,
-decoded-frame transport, real Sunshine pairing/streaming/first-frame evidence,
-1920x1080 performance evidence, and GPL/legal approval for the eventual
-distribution boundary. No release or package is published from this branch.
+This spike is not release-ready. It still requires real Sunshine PIN pairing
+and pairing-output persistence through the existing protected store, decoded
+frame transport, real streaming/first-frame/disconnect evidence, 1920x1080
+performance evidence, and GPL/legal approval for the eventual distribution
+boundary. No release or package is published from this branch.
