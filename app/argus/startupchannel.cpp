@@ -854,6 +854,11 @@ const QString& StartupPayload::endpoint() const
     return m_endpoint;
 }
 
+const QString& StartupPayload::displayId() const
+{
+    return m_displayId;
+}
+
 const QString& StartupPayload::identityFormat() const
 {
     return m_identityFormat;
@@ -880,6 +885,8 @@ void StartupPayload::clear()
     m_session.clear();
     m_endpoint.fill(QChar('\0'));
     m_endpoint.clear();
+    m_displayId.fill(QChar('\0'));
+    m_displayId.clear();
     m_identityFormat.fill(QChar('\0'));
     m_identityFormat.clear();
     secureZero(m_identity.data(), m_identity.size());
@@ -961,6 +968,8 @@ StartupCodecStatus StartupCodec::decodePayload(
     qint32 version;
     StartupSession session;
     QByteArray endpointBytes;
+    QByteArray displayIdBytes;
+    unsigned char hasDisplayId;
     QByteArray formatBytes;
     QByteArray identity;
     unsigned char hasFrameSlot;
@@ -974,23 +983,43 @@ StartupCodecStatus StartupCodec::decodePayload(
                 reader,
                 MaximumEndpointBytes,
                 endpointBytes)
+            || !reader.readByte(hasDisplayId)
+            || hasDisplayId > 1
+            || (hasDisplayId == 1
+                && !readBoundedBytes(
+                    reader,
+                    MaximumDisplayIdBytes,
+                    displayIdBytes))
             || !readBoundedBytes(
                 reader,
                 MaximumIdentityFormatBytes,
                 formatBytes)
             || !isValidIdentityFormat(formatBytes)) {
         secureZero(endpointBytes.data(), endpointBytes.size());
+        secureZero(displayIdBytes.data(), displayIdBytes.size());
         secureZero(formatBytes.data(), formatBytes.size());
         return StartupCodecStatus::InvalidPayload;
     }
 
     QString endpoint;
+    const QString displayId = QString::fromUtf8(displayIdBytes);
     if (!isValidEndpoint(endpointBytes, endpoint)) {
         secureZero(endpointBytes.data(), endpointBytes.size());
+        secureZero(displayIdBytes.data(), displayIdBytes.size());
         secureZero(formatBytes.data(), formatBytes.size());
         return StartupCodecStatus::InvalidPayload;
     }
     secureZero(endpointBytes.data(), endpointBytes.size());
+    const bool displayIdValid = displayId.toUtf8() == displayIdBytes
+        && std::none_of(
+            displayId.cbegin(),
+            displayId.cend(),
+            [](QChar character) { return !character.isPrint(); });
+    secureZero(displayIdBytes.data(), displayIdBytes.size());
+    if (!displayIdValid) {
+        secureZero(formatBytes.data(), formatBytes.size());
+        return StartupCodecStatus::InvalidPayload;
+    }
 
     qint32 identityLength;
     if (!reader.readInt32(identityLength)
@@ -1044,6 +1073,7 @@ StartupCodecStatus StartupCodec::decodePayload(
 
     payload.m_session = session;
     payload.m_endpoint = endpoint;
+    payload.m_displayId = displayId;
     payload.m_identityFormat = QString::fromLatin1(formatBytes);
     payload.m_identity = identity;
     payload.m_frameSlot = frameSlot;
@@ -1310,6 +1340,11 @@ const QByteArray& StreamControlRequest::serverCertificate() const
     return m_serverCertificate;
 }
 
+const QString& StreamControlRequest::displayId() const
+{
+    return m_displayId;
+}
+
 qint32 StreamControlRequest::appId() const
 {
     return m_appId;
@@ -1354,6 +1389,8 @@ void StreamControlRequest::clear()
         m_serverCertificate.data(),
         m_serverCertificate.size());
     m_serverCertificate.clear();
+    m_displayId.fill(QChar('\0'));
+    m_displayId.clear();
     m_appId = 0;
     m_codec = StreamVideoCodec::H264;
     m_width = 0;
@@ -1389,6 +1426,7 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
     QByteArray nonce;
     QByteArray endpointBytes;
     QByteArray serverCertificate;
+    QByteArray displayIdBytes;
     qint32 appId;
     qint32 codecValue;
     qint32 width;
@@ -1407,6 +1445,8 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
             serverCertificate.data(),
             serverCertificate.size());
         serverCertificate.clear();
+        secureZero(displayIdBytes.data(), displayIdBytes.size());
+        displayIdBytes.clear();
         secureZero(mapNameBytes.data(), mapNameBytes.size());
         mapNameBytes.clear();
         secureZero(mutexNameBytes.data(), mutexNameBytes.size());
@@ -1427,6 +1467,10 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
                 reader,
                 MaximumServerCertificateBytes,
                 serverCertificate)
+            || !readBoundedBytes(
+                reader,
+                MaximumDisplayIdBytes,
+                displayIdBytes)
             || !reader.readInt32(appId)
             || !reader.readInt32(codecValue)
             || !reader.readInt32(width)
@@ -1461,12 +1505,19 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
     }
 
     QString endpoint;
+    const QString displayId = QString::fromUtf8(displayIdBytes);
     slot.mapName = QString::fromUtf8(mapNameBytes);
     slot.mutexName = QString::fromUtf8(mutexNameBytes);
     const qint64 requiredPayload =
         static_cast<qint64>(width) * 4 * height;
     const bool valid =
         isValidStreamEndpoint(endpointBytes, endpoint)
+        && !displayId.isEmpty()
+        && displayId.toUtf8() == displayIdBytes
+        && std::none_of(
+            displayId.cbegin(),
+            displayId.cend(),
+            [](QChar character) { return !character.isPrint(); })
         && appId >= 1
         && static_cast<StreamVideoCodec>(codecValue)
             == StreamVideoCodec::H264
@@ -1496,6 +1547,7 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
     request.m_session = session;
     request.m_endpoint = endpoint;
     request.m_serverCertificate = std::move(serverCertificate);
+    request.m_displayId = displayId;
     request.m_appId = appId;
     request.m_codec = static_cast<StreamVideoCodec>(codecValue);
     request.m_width = width;

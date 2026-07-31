@@ -254,7 +254,7 @@ QByteArray encodeSession(const ArgusWorker::StartupSession& session)
 
 QByteArray encodeChallenge(
     const ArgusWorker::StartupSession& session,
-    qint32 version = 1)
+    qint32 version = ArgusWorker::StartupProtocolVersion)
 {
     const QByteArray nonce(32, '\x5a');
     QByteArray challenge;
@@ -274,9 +274,11 @@ QByteArray encodePayload(
     qint32 maxWidth = 1920)
 {
     QByteArray payload;
-    appendInt32(payload, 1);
+    appendInt32(payload, ArgusWorker::StartupProtocolVersion);
     payload.append(encodeSession(session));
     appendText(payload, endpoint);
+    payload.append('\x01');
+    appendText(payload, "{17ad0e1c-9a35-4ae8-bc82-91f7e12d98f0}");
     appendText(payload, "moonlight-qt");
     appendInt32(payload, identity.size());
     payload.append(identity);
@@ -299,12 +301,13 @@ QByteArray encodeStreamRequest(
     const QByteArray& serverCertificate = "server-certificate")
 {
     QByteArray request;
-    appendInt32(request, 1);
+    appendInt32(request, ArgusWorker::StartupProtocolVersion);
     appendInt32(request, 3);
     request.append(encodeSession(session));
     appendText(request, nonce);
     appendText(request, endpoint);
     appendText(request, serverCertificate);
+    appendText(request, "{17ad0e1c-9a35-4ae8-bc82-91f7e12d98f0}");
     appendInt32(request, 1);
     appendInt32(request, 1);
     appendInt32(request, 1920);
@@ -335,6 +338,9 @@ void checkStreamControlCodec()
           "Managed stream request fixture must decode");
     check(request.endpoint()
               == QStringLiteral("http://127.0.0.1:48989")
+              && request.displayId()
+                  == QStringLiteral(
+                      "{17ad0e1c-9a35-4ae8-bc82-91f7e12d98f0}")
               && request.appId() == 1
               && request.codec()
                   == ArgusWorker::StreamVideoCodec::H264
@@ -382,7 +388,7 @@ void checkStreamControlCodec()
               == ArgusWorker::StreamControlCodecStatus::Accepted,
           "Completed stream response must encode");
     QByteArray expectedResponse;
-    appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, ArgusWorker::StartupProtocolVersion);
     appendInt32(expectedResponse, 4);
     expectedResponse.append(encodeSession(session));
     appendInt32(expectedResponse, 1);
@@ -405,7 +411,7 @@ QByteArray encodePairingRequest(
     const QByteArray& serverCertificate)
 {
     QByteArray request;
-    appendInt32(request, 1);
+    appendInt32(request, ArgusWorker::StartupProtocolVersion);
     appendInt32(request, 1);
     request.append(encodeSession(session));
     appendInt32(request, operation);
@@ -461,7 +467,7 @@ void checkPairingControlCodec()
               == ArgusWorker::PairingControlCodecStatus::Accepted,
           "Paired response must encode");
     QByteArray expectedResponse;
-    appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, ArgusWorker::StartupProtocolVersion);
     appendInt32(expectedResponse, 2);
     expectedResponse.append(encodeSession(session));
     appendInt32(expectedResponse, 1);
@@ -537,7 +543,7 @@ void checkManagedCodecFixture()
               == ArgusWorker::StartupCodecStatus::Accepted,
           "Worker hello must encode");
     QByteArray expectedHello;
-    appendInt32(expectedHello, 1);
+    appendInt32(expectedHello, ArgusWorker::StartupProtocolVersion);
     appendInt32(expectedHello, nonce.size());
     expectedHello.append(nonce);
     expectedHello.append(encodeSession(expectedSession));
@@ -575,7 +581,7 @@ void checkCodecFailures()
     const ArgusWorker::StartupSession session = fixtureSession();
     ArgusWorker::StartupChallenge challenge;
 
-    QByteArray wrongVersion = encodeChallenge(session, 2);
+    QByteArray wrongVersion = encodeChallenge(session, 1);
     check(ArgusWorker::StartupCodec::decodeChallenge(
               wrongVersion,
               challenge)
@@ -1136,6 +1142,7 @@ PairingControlOutcome executePairingControl(
 }
 
 StreamControlOutcome executeStreamControl(
+    const QString&,
     const QString&,
     const StartupFrameSlotDescriptor&,
     StreamControlRequest& request,

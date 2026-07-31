@@ -37,6 +37,7 @@ namespace ArgusWorker
 
 StreamControlOutcome executeStreamControl(
     const QString& startupEndpoint,
+    const QString& startupDisplayId,
     const StartupFrameSlotDescriptor& startupFrameSlot,
     StreamControlRequest& request,
     StreamControlResponse& response)
@@ -47,6 +48,8 @@ StreamControlOutcome executeStreamControl(
     });
     response.clear();
     if (startupEndpoint != request.endpoint()
+            || startupDisplayId.isEmpty()
+            || startupDisplayId != request.displayId()
             || !sameFrameSlot(startupFrameSlot, request.frameSlot())) {
         response.setOutcome(
             session,

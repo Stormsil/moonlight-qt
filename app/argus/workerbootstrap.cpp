@@ -154,6 +154,7 @@ int runStartup(const QStringList& arguments)
     }
 
     QString endpoint = payload.endpoint();
+    QString displayId = payload.displayId();
     const StartupFrameSlotDescriptor frameSlot = payload.frameSlot();
     const StartupSession session = payload.session();
     QString identityFormat = payload.identityFormat();
@@ -215,11 +216,14 @@ int runStartup(const QStringList& arguments)
         const StreamControlOutcome streamOutcome =
             executeStreamControl(
                 endpoint,
+                displayId,
                 frameSlot,
                 request,
                 response);
         endpoint.fill(QChar('\0'));
         endpoint.clear();
+        displayId.fill(QChar('\0'));
+        displayId.clear();
         if (channel.sendStreamResponse(response)
                 != StartupChannelStatus::Accepted) {
             return ExitHandshakeUnavailable;

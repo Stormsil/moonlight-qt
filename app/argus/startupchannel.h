@@ -9,7 +9,7 @@
 namespace ArgusWorker
 {
 
-inline constexpr int StartupProtocolVersion = 1;
+inline constexpr int StartupProtocolVersion = 2;
 inline constexpr int StartupNonceBytes = 32;
 inline constexpr int MaximumStartupPacketBytes =
     (256 * 1024) + (64 * 1024) + 8192;
@@ -17,6 +17,7 @@ inline constexpr int MaximumEndpointBytes = 2048;
 inline constexpr int MaximumIdentityFormatBytes = 64;
 inline constexpr int MaximumIdentityBytes = 256 * 1024;
 inline constexpr int MaximumServerCertificateBytes = 64 * 1024;
+inline constexpr int MaximumDisplayIdBytes = 256;
 inline constexpr int MaximumCapabilityNameBytes = 512;
 
 using StartupGuidBytes = std::array<unsigned char, 16>;
@@ -68,6 +69,7 @@ public:
 
     const StartupSession& session() const;
     const QString& endpoint() const;
+    const QString& displayId() const;
     const QString& identityFormat() const;
     const QByteArray& identity() const;
     QByteArray takeIdentity();
@@ -78,6 +80,7 @@ public:
 private:
     StartupSession m_session;
     QString m_endpoint;
+    QString m_displayId;
     QString m_identityFormat;
     QByteArray m_identity;
     StartupFrameSlotDescriptor m_frameSlot;
@@ -223,6 +226,7 @@ public:
     const StartupSession& session() const;
     const QString& endpoint() const;
     const QByteArray& serverCertificate() const;
+    const QString& displayId() const;
     qint32 appId() const;
     StreamVideoCodec codec() const;
     qint32 width() const;
@@ -236,6 +240,7 @@ private:
     StartupSession m_session;
     QString m_endpoint;
     QByteArray m_serverCertificate;
+    QString m_displayId;
     qint32 m_appId = 0;
     StreamVideoCodec m_codec = StreamVideoCodec::H264;
     qint32 m_width = 0;
