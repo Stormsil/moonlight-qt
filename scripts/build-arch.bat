@@ -112,6 +112,7 @@ set BUILD_FOLDER=%BUILD_ROOT%\build-%ARCH%-%BUILD_CONFIG%
 set DEPLOY_FOLDER=%BUILD_ROOT%\deploy-%ARCH%-%BUILD_CONFIG%
 set INSTALLER_FOLDER=%BUILD_ROOT%\installer-%ARCH%-%BUILD_CONFIG%
 set SYMBOLS_FOLDER=%BUILD_ROOT%\symbols-%ARCH%-%BUILD_CONFIG%
+set ARGUS_RECEIPT_FOLDER=%BUILD_ROOT%\argus-receipts
 
 rem Allow CI to override the version.txt with an environment variable
 if defined CI_VERSION (
@@ -148,11 +149,13 @@ rmdir /s /q %DEPLOY_FOLDER%
 rmdir /s /q %BUILD_FOLDER%
 rmdir /s /q %INSTALLER_FOLDER%
 rmdir /s /q %SYMBOLS_FOLDER%
+if defined ARGUS_COMMON_C_DIR rmdir /s /q %ARGUS_RECEIPT_FOLDER%
 mkdir %BUILD_ROOT%
 mkdir %DEPLOY_FOLDER%
 mkdir %BUILD_FOLDER%
 mkdir %INSTALLER_FOLDER%
 mkdir %SYMBOLS_FOLDER%
+if defined ARGUS_COMMON_C_DIR mkdir %ARGUS_RECEIPT_FOLDER%
 
 rem Enable LTCG for official builds
 set CFLAGS=/GL
@@ -277,6 +280,11 @@ if !ERRORLEVEL! NEQ 0 goto Error
 echo Copying application binary to deployment directory
 copy %BUILD_FOLDER%\app\%BUILD_CONFIG%\Moonlight.exe %DEPLOY_FOLDER%
 if !ERRORLEVEL! NEQ 0 goto Error
+
+if defined ARGUS_COMMON_C_DIR (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%SOURCE_ROOT%\app\argus\common-c\Write-BuildReceipt.ps1" -SourceRoot "%SOURCE_ROOT%" -MaterializedCommonCRoot "%ARGUS_COMMON_C_DIR%" -WorkerPath "%DEPLOY_FOLDER%\Moonlight.exe" -OutputPath "%ARGUS_RECEIPT_FOLDER%\no-input-%ARCH%-%BUILD_CONFIG%.json" -Configuration "%BUILD_CONFIG%" -Architecture "%ARCH%"
+    if !ERRORLEVEL! NEQ 0 goto Error
+)
 
 echo Building portable package
 rem This must be done after WiX harvesting and signing, since the VCRT dlls are MS signed
