@@ -166,6 +166,8 @@ macx {
 }
 
 SOURCES += \
+    argus/pairingclient.cpp \
+    argus/pairingendpoint.cpp \
     argus/pairingidentitypackage.cpp \
     argus/startupchannel.cpp \
     argus/workerbootstrap.cpp \
@@ -210,6 +212,8 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
+    argus/pairingclient.h \
+    argus/pairingendpoint.h \
     argus/pairingidentitypackage.h \
     argus/startupchannel.h \
     argus/workerbootstrap.h \

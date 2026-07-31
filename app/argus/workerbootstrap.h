@@ -13,6 +13,7 @@ enum ExitCode {
     ExitInvalidArguments = 64,
     ExitStartupCapabilityUnavailable = 78,
     ExitHandshakeUnavailable = 79,
+    ExitPairingRejected = 80,
 };
 
 bool isRequested(int argc, char* argv[]);

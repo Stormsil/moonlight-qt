@@ -12,10 +12,11 @@ namespace ArgusWorker
 inline constexpr int StartupProtocolVersion = 1;
 inline constexpr int StartupNonceBytes = 32;
 inline constexpr int MaximumStartupPacketBytes =
-    (256 * 1024) + 8192;
+    (256 * 1024) + (64 * 1024) + 8192;
 inline constexpr int MaximumEndpointBytes = 2048;
 inline constexpr int MaximumIdentityFormatBytes = 64;
 inline constexpr int MaximumIdentityBytes = 256 * 1024;
+inline constexpr int MaximumServerCertificateBytes = 64 * 1024;
 inline constexpr int MaximumCapabilityNameBytes = 512;
 
 using StartupGuidBytes = std::array<unsigned char, 16>;
@@ -112,6 +113,100 @@ public:
         StartupPayload& payload);
 };
 
+enum class PairingControlOperation
+{
+    Pair = 1,
+    Verify = 2,
+};
+
+enum class PairingControlOutcome
+{
+    Paired = 1,
+    AlreadyPaired = 2,
+    WrongPin = 3,
+    Unavailable = 4,
+    Rejected = 5,
+};
+
+class PairingControlRequest
+{
+public:
+    PairingControlRequest() = default;
+    PairingControlRequest(const PairingControlRequest&) = delete;
+    PairingControlRequest& operator=(const PairingControlRequest&) = delete;
+    ~PairingControlRequest();
+
+    const StartupSession& session() const;
+    PairingControlOperation operation() const;
+    const QByteArray& pin() const;
+    const QByteArray& serverCertificate() const;
+    QByteArray takePin();
+    void clear();
+
+private:
+    StartupSession m_session;
+    PairingControlOperation m_operation =
+        PairingControlOperation::Pair;
+    QByteArray m_pin;
+    QByteArray m_serverCertificate;
+
+    friend class PairingControlCodec;
+};
+
+class PairingControlResponse
+{
+public:
+    PairingControlResponse() = default;
+    PairingControlResponse(const PairingControlResponse&) = delete;
+    PairingControlResponse& operator=(const PairingControlResponse&) = delete;
+    ~PairingControlResponse();
+
+    const StartupSession& session() const;
+    PairingControlOutcome outcome() const;
+    const QByteArray& identityFormat() const;
+    const QByteArray& identity() const;
+    const QByteArray& serverCertificate() const;
+
+    void setPaired(
+        const StartupSession& session,
+        const QByteArray& identityFormat,
+        QByteArray identity,
+        QByteArray serverCertificate);
+    void setOutcome(
+        const StartupSession& session,
+        PairingControlOutcome outcome);
+    void clear();
+
+private:
+    StartupSession m_session;
+    PairingControlOutcome m_outcome =
+        PairingControlOutcome::Rejected;
+    QByteArray m_identityFormat;
+    QByteArray m_identity;
+    QByteArray m_serverCertificate;
+};
+
+enum class PairingControlCodecStatus
+{
+    Accepted,
+    PacketOutOfBounds,
+    InvalidPacket,
+    SessionMismatch,
+};
+
+class PairingControlCodec
+{
+public:
+    static PairingControlCodecStatus decodeRequest(
+        const QByteArray& packet,
+        const StartupSession& expectedSession,
+        PairingControlRequest& request);
+
+    static PairingControlCodecStatus encodeResponse(
+        const PairingControlResponse& response,
+        QByteArray& packet);
+};
+
 enum class StartupChannelStatus
 {
     Accepted,
@@ -133,13 +228,24 @@ public:
     StartupChannel() = default;
     StartupChannel(const StartupChannel&) = delete;
     StartupChannel& operator=(const StartupChannel&) = delete;
+    ~StartupChannel();
 
     StartupChannelStatus receive(
         const QString& pipeName,
         StartupPayload& payload);
 
+    StartupChannelStatus receivePairingRequest(
+        const StartupSession& expectedSession,
+        PairingControlRequest& request);
+
+    StartupChannelStatus sendPairingResponse(
+        const PairingControlResponse& response);
+
 private:
     bool m_used = false;
+    bool m_pairingUsed = false;
+    bool m_pairingResponsePending = false;
+    void* m_pipeHandle = nullptr;
 };
 
 #if defined(ARGUS_STARTUP_CHANNEL_TESTS) && defined(Q_OS_WIN)

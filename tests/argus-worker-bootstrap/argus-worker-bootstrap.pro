@@ -9,13 +9,16 @@ INCLUDEPATH += ../../app
 
 SOURCES += \
     main.cpp \
+    ../../app/argus/pairingendpoint.cpp \
     ../../app/argus/pairingidentitypackage.cpp \
     ../../app/argus/startupchannel.cpp \
     ../../app/argus/workerbootstrap.cpp \
-    ../../app/backend/identitymanager.cpp
+    ../../app/backend/identitymanager.cpp \
+    ../../app/backend/nvaddress.cpp
 
 HEADERS += \
     ../../app/argus/pairingidentitypackage.h \
+    ../../app/argus/pairingendpoint.h \
     ../../app/argus/startupchannel.h \
     ../../app/argus/workerbootstrap.h \
     ../../app/backend/identitymanager.h

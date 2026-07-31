@@ -24,12 +24,15 @@ public:
     PairState
     pair(QString appVersion, QString pin, QSslCertificate& serverCert);
 
+    PairState
+    pair(QString appVersion, QByteArray pin, QSslCertificate& serverCert);
+
 private:
     QByteArray
     generateRandomBytes(int length);
 
     QByteArray
-    saltPin(const QByteArray& salt, QString pin);
+    saltPin(const QByteArray& salt, const QByteArray& pin);
 
     QByteArray
     encrypt(const QByteArray& plaintext, const QByteArray& key);

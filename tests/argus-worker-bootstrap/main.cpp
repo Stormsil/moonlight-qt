@@ -1,7 +1,10 @@
 #include "argus/workerbootstrap.h"
+#include "argus/pairingclient.h"
+#include "argus/pairingendpoint.h"
 #include "argus/startupchannel.h"
 #include "argus/pairingidentitypackage.h"
 #include "backend/identitymanager.h"
+#include "backend/nvaddress.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -286,6 +289,118 @@ QByteArray encodePayload(
         appendInt32(payload, 8 * 1024 * 1024);
     }
     return payload;
+}
+
+QByteArray encodePairingRequest(
+    const ArgusWorker::StartupSession& session,
+    qint32 operation,
+    const QByteArray& pin,
+    const QByteArray& serverCertificate)
+{
+    QByteArray request;
+    appendInt32(request, 1);
+    appendInt32(request, 1);
+    request.append(encodeSession(session));
+    appendInt32(request, operation);
+    appendText(request, pin);
+    appendText(request, serverCertificate);
+    return request;
+}
+
+void checkPairingControlCodec()
+{
+    NvAddress defaultPort;
+    check(ArgusWorker::parsePairingEndpoint(
+              "http://sunshine.invalid",
+              defaultPort)
+              && defaultPort.port() == 80,
+          "Managed-normalized HTTP default port must be accepted");
+    NvAddress explicitPort;
+    check(ArgusWorker::parsePairingEndpoint(
+              "http://sunshine.invalid:48989",
+              explicitPort)
+              && explicitPort.port() == 48989,
+          "Explicit Sunshine HTTP port must be preserved");
+
+    const ArgusWorker::StartupSession session = fixtureSession();
+    const QByteArray pairPacket = encodePairingRequest(
+        session,
+        1,
+        "4831",
+        QByteArray());
+    ArgusWorker::PairingControlRequest request;
+    check(ArgusWorker::PairingControlCodec::decodeRequest(
+              pairPacket,
+              session,
+              request)
+              == ArgusWorker::PairingControlCodecStatus::Accepted,
+          "Managed pairing request fixture must decode");
+    check(request.operation()
+              == ArgusWorker::PairingControlOperation::Pair
+              && request.pin() == QByteArray("4831")
+              && request.serverCertificate().isEmpty(),
+          "Pairing request fields must retain exact managed bytes");
+
+    ArgusWorker::PairingControlResponse response;
+    response.setPaired(
+        session,
+        ArgusWorker::PairingIdentityFormat,
+        QByteArray("identity-package"),
+        QByteArray("server-certificate"));
+    QByteArray responsePacket;
+    check(ArgusWorker::PairingControlCodec::encodeResponse(
+              response,
+              responsePacket)
+              == ArgusWorker::PairingControlCodecStatus::Accepted,
+          "Paired response must encode");
+    QByteArray expectedResponse;
+    appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, 2);
+    expectedResponse.append(encodeSession(session));
+    appendInt32(expectedResponse, 1);
+    appendText(expectedResponse, ArgusWorker::PairingIdentityFormat);
+    appendText(expectedResponse, "identity-package");
+    appendText(expectedResponse, "server-certificate");
+    check(responsePacket == expectedResponse,
+          "Worker pairing response must match managed byte contract");
+
+    response.setPaired(
+        session,
+        ArgusWorker::PairingIdentityFormat,
+        QByteArray(ArgusWorker::MaximumIdentityBytes, 'i'),
+        QByteArray(ArgusWorker::MaximumServerCertificateBytes, 'c'));
+    check(ArgusWorker::PairingControlCodec::encodeResponse(
+              response,
+              responsePacket)
+              == ArgusWorker::PairingControlCodecStatus::Accepted,
+          "Bounded identity and certificate must fit one response");
+
+    QByteArray trailing = pairPacket;
+    trailing.append('\0');
+    check(ArgusWorker::PairingControlCodec::decodeRequest(
+              trailing,
+              session,
+              request)
+              == ArgusWorker::PairingControlCodecStatus::InvalidPacket,
+          "Pairing request trailing bytes must fail closed");
+    ArgusWorker::StartupSession wrongSession = fixtureSession();
+    wrongSession.sessionId[0] ^= 0xff;
+    check(ArgusWorker::PairingControlCodec::decodeRequest(
+              pairPacket,
+              wrongSession,
+              request)
+              == ArgusWorker::PairingControlCodecStatus::SessionMismatch,
+          "Pairing request stale session must fail closed");
+    check(ArgusWorker::PairingControlCodec::decodeRequest(
+              encodePairingRequest(
+                  session,
+                  1,
+                  "12345",
+                  QByteArray()),
+              session,
+              request)
+              == ArgusWorker::PairingControlCodecStatus::InvalidPacket,
+          "Pairing request noncanonical PIN must fail closed");
 }
 
 void checkManagedCodecFixture()
@@ -805,6 +920,23 @@ void checkExpiredDeadlineDrain()
 
 }
 
+namespace ArgusWorker
+{
+
+PairingControlOutcome executePairingControl(
+    const QString&,
+    PairingControlRequest& request,
+    PairingControlResponse& response)
+{
+    response.setOutcome(
+        request.session(),
+        PairingControlOutcome::Rejected);
+    request.clear();
+    return PairingControlOutcome::Rejected;
+}
+
+}
+
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
@@ -826,6 +958,7 @@ int main(int argc, char* argv[])
 
     checkManagedCodecFixture();
     checkCodecFailures();
+    checkPairingControlCodec();
 
 #if defined(Q_OS_WIN)
     checkChannelTimeoutAndReuse();

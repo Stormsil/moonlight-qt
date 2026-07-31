@@ -1,6 +1,8 @@
 #include "nvpairingmanager.h"
 #include "utils.h"
 
+#include <QScopeGuard>
+
 #include <stdexcept>
 
 #include <openssl/bio.h>
@@ -15,6 +17,10 @@ NvPairingManager::NvPairingManager(NvComputer* computer) :
     m_Http(computer)
 {
     QByteArray cert = IdentityManager::get()->getCertificate();
+    const auto certZero = qScopeGuard([&cert]() {
+        cert.fill('\0');
+        cert.clear();
+    });
     BIO *bio = BIO_new_mem_buf(cert.data(), -1);
     THROW_BAD_ALLOC_IF_NULL(bio);
 
@@ -26,6 +32,10 @@ NvPairingManager::NvPairingManager(NvComputer* computer) :
     }
 
     QByteArray pk = IdentityManager::get()->getPrivateKey();
+    const auto privateKeyZero = qScopeGuard([&pk]() {
+        pk.fill('\0');
+        pk.clear();
+    });
     bio = BIO_new_mem_buf(pk.data(), -1);
     THROW_BAD_ALLOC_IF_NULL(bio);
 
@@ -198,14 +208,36 @@ NvPairingManager::signMessage(const QByteArray& message)
 }
 
 QByteArray
-NvPairingManager::saltPin(const QByteArray& salt, QString pin)
+NvPairingManager::saltPin(
+    const QByteArray& salt,
+    const QByteArray& pin)
 {
-    return QByteArray().append(salt).append(pin.toUtf8());
+    return QByteArray().append(salt).append(pin);
 }
 
 NvPairingManager::PairState
 NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverCert)
 {
+    QByteArray pinBytes = pin.toUtf8();
+    const PairState result = pair(
+        std::move(appVersion),
+        pinBytes,
+        serverCert);
+    pinBytes.fill('\0');
+    pinBytes.clear();
+    return result;
+}
+
+NvPairingManager::PairState
+NvPairingManager::pair(
+    QString appVersion,
+    QByteArray pin,
+    QSslCertificate& serverCert)
+{
+    const auto pinZero = qScopeGuard([&pin]() {
+        pin.fill('\0');
+        pin.clear();
+    });
     int serverMajorVersion = NvHTTP::parseQuad(appVersion).at(0);
     qInfo() << "Pairing with server generation:" << serverMajorVersion;
 
@@ -226,8 +258,16 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
 
     QByteArray salt = generateRandomBytes(16);
     QByteArray saltedPin = saltPin(salt, pin);
+    const auto saltedPinZero = qScopeGuard([&saltedPin]() {
+        saltedPin.fill('\0');
+        saltedPin.clear();
+    });
 
     QByteArray aesKey = QCryptographicHash::hash(saltedPin, hashAlgo).constData();
+    const auto aesKeyZero = qScopeGuard([&aesKey]() {
+        aesKey.fill('\0');
+        aesKey.clear();
+    });
     aesKey.truncate(16);
 
     QString getCert = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
@@ -263,6 +303,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     m_Http.setServerCert(unverifiedServerCert);
 
     QByteArray randomChallenge = generateRandomBytes(16);
+    const auto randomChallengeZero = qScopeGuard([&randomChallenge]() {
+        randomChallenge.fill('\0');
+        randomChallenge.clear();
+    });
     QByteArray encryptedChallenge = encrypt(randomChallenge, aesKey);
     QString challengeXml = m_Http.openConnectionToString(m_Http.m_BaseUrlHttp,
                                                          "pair",
@@ -278,6 +322,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     }
 
     QByteArray challengeResponseData = decrypt(m_Http.getXmlStringFromHex(challengeXml, "challengeresponse"), aesKey);
+    const auto challengeResponseDataZero = qScopeGuard([&challengeResponseData]() {
+        challengeResponseData.fill('\0');
+        challengeResponseData.clear();
+    });
     if (challengeResponseData.size() < hashLength) {
         qCritical() << "Invalid challengeresponse at stage #2";
         m_Http.openConnectionToString(m_Http.m_BaseUrlHttp, "unpair", nullptr, REQUEST_TIMEOUT_MS);
@@ -285,6 +333,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     }
 
     QByteArray clientSecretData = generateRandomBytes(16);
+    const auto clientSecretZero = qScopeGuard([&clientSecretData]() {
+        clientSecretData.fill('\0');
+        clientSecretData.clear();
+    });
     QByteArray challengeResponse;
     QByteArray serverResponse(challengeResponseData.data(), hashLength);
 
@@ -309,6 +361,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     }
 
     QByteArray pairingSecret = NvHTTP::getXmlStringFromHex(respXml, "pairingsecret");
+    const auto pairingSecretZero = qScopeGuard([&pairingSecret]() {
+        pairingSecret.fill('\0');
+        pairingSecret.clear();
+    });
     if (pairingSecret.size() <= 16) {
         qCritical() << "Invalid pairingsecret at stage #3";
         m_Http.openConnectionToString(m_Http.m_BaseUrlHttp, "unpair", nullptr, REQUEST_TIMEOUT_MS);
@@ -316,6 +372,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     }
 
     QByteArray serverSecret = pairingSecret.left(16);
+    const auto serverSecretZero = qScopeGuard([&serverSecret]() {
+        serverSecret.fill('\0');
+        serverSecret.clear();
+    });
     QByteArray serverSignature = pairingSecret.mid(16);
 
     if (!verifySignature(serverSecret,
@@ -339,6 +399,10 @@ NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverC
     }
 
     QByteArray clientPairingSecret;
+    const auto clientPairingSecretZero = qScopeGuard([&clientPairingSecret]() {
+        clientPairingSecret.fill('\0');
+        clientPairingSecret.clear();
+    });
     clientPairingSecret.append(clientSecretData);
     clientPairingSecret.append(signMessage(clientSecretData));
 

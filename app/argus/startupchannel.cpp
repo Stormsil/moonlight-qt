@@ -21,6 +21,9 @@ constexpr int MaximumFrameWidth = 1920;
 constexpr int MaximumFrameHeight = 1080;
 constexpr int MaximumFramePayloadBytes = 8 * 1024 * 1024;
 constexpr qint64 DotNetFileTimeOffsetTicks = 504911232000000000LL;
+constexpr int PairingPinBytes = 4;
+constexpr qint32 PairingRequestMessageType = 1;
+constexpr qint32 PairingResponseMessageType = 2;
 
 class PacketReader
 {
@@ -162,6 +165,29 @@ bool readBoundedBytes(
         && reader.readBytes(length, value);
 }
 
+bool readBoundedOptionalBytes(
+    PacketReader& reader,
+    int maximumLength,
+    QByteArray& value)
+{
+    qint32 length;
+    return reader.readInt32(length)
+        && length >= 0
+        && length <= maximumLength
+        && reader.readBytes(length, value);
+}
+
+bool isCanonicalPairingPin(const QByteArray& pin)
+{
+    return pin.size() == PairingPinBytes
+        && std::all_of(
+            pin.cbegin(),
+            pin.cend(),
+            [](char value) {
+                return value >= '0' && value <= '9';
+            });
+}
+
 bool isValidIdentityFormat(const QByteArray& format)
 {
     return std::all_of(
@@ -262,6 +288,11 @@ public:
     {
         return m_handle != INVALID_HANDLE_VALUE
             && m_handle != nullptr;
+    }
+
+    HANDLE release()
+    {
+        return std::exchange(m_handle, INVALID_HANDLE_VALUE);
     }
 
 private:
@@ -685,6 +716,23 @@ ArgusWorker::StartupChannelStatus mapCodecStatus(
     return StartupChannelStatus::IoFailure;
 }
 
+ArgusWorker::StartupChannelStatus mapPairingCodecStatus(
+    ArgusWorker::PairingControlCodecStatus status)
+{
+    switch (status) {
+    case ArgusWorker::PairingControlCodecStatus::Accepted:
+        return ArgusWorker::StartupChannelStatus::Accepted;
+    case ArgusWorker::PairingControlCodecStatus::PacketOutOfBounds:
+        return ArgusWorker::StartupChannelStatus::PacketOutOfBounds;
+    case ArgusWorker::PairingControlCodecStatus::SessionMismatch:
+        return ArgusWorker::StartupChannelStatus::SessionMismatch;
+    case ArgusWorker::PairingControlCodecStatus::InvalidPacket:
+        return ArgusWorker::StartupChannelStatus::InvalidPayload;
+    }
+
+    return ArgusWorker::StartupChannelStatus::IoFailure;
+}
+
 }
 
 namespace ArgusWorker
@@ -948,6 +996,240 @@ StartupCodecStatus StartupCodec::decodePayload(
     return StartupCodecStatus::Accepted;
 }
 
+PairingControlRequest::~PairingControlRequest()
+{
+    clear();
+}
+
+const StartupSession& PairingControlRequest::session() const
+{
+    return m_session;
+}
+
+PairingControlOperation PairingControlRequest::operation() const
+{
+    return m_operation;
+}
+
+const QByteArray& PairingControlRequest::pin() const
+{
+    return m_pin;
+}
+
+const QByteArray& PairingControlRequest::serverCertificate() const
+{
+    return m_serverCertificate;
+}
+
+QByteArray PairingControlRequest::takePin()
+{
+    return std::move(m_pin);
+}
+
+void PairingControlRequest::clear()
+{
+    m_session.clear();
+    secureZero(m_pin.data(), m_pin.size());
+    m_pin.clear();
+    secureZero(
+        m_serverCertificate.data(),
+        m_serverCertificate.size());
+    m_serverCertificate.clear();
+}
+
+PairingControlResponse::~PairingControlResponse()
+{
+    clear();
+}
+
+const StartupSession& PairingControlResponse::session() const
+{
+    return m_session;
+}
+
+PairingControlOutcome PairingControlResponse::outcome() const
+{
+    return m_outcome;
+}
+
+const QByteArray& PairingControlResponse::identityFormat() const
+{
+    return m_identityFormat;
+}
+
+const QByteArray& PairingControlResponse::identity() const
+{
+    return m_identity;
+}
+
+const QByteArray& PairingControlResponse::serverCertificate() const
+{
+    return m_serverCertificate;
+}
+
+void PairingControlResponse::setPaired(
+    const StartupSession& session,
+    const QByteArray& identityFormat,
+    QByteArray identity,
+    QByteArray serverCertificate)
+{
+    clear();
+    m_session = session;
+    m_outcome = PairingControlOutcome::Paired;
+    m_identityFormat = identityFormat;
+    m_identity = std::move(identity);
+    m_serverCertificate = std::move(serverCertificate);
+}
+
+void PairingControlResponse::setOutcome(
+    const StartupSession& session,
+    PairingControlOutcome outcome)
+{
+    clear();
+    m_session = session;
+    m_outcome = outcome;
+}
+
+void PairingControlResponse::clear()
+{
+    m_session.clear();
+    secureZero(m_identityFormat.data(), m_identityFormat.size());
+    m_identityFormat.clear();
+    secureZero(m_identity.data(), m_identity.size());
+    m_identity.clear();
+    secureZero(
+        m_serverCertificate.data(),
+        m_serverCertificate.size());
+    m_serverCertificate.clear();
+    m_outcome = PairingControlOutcome::Rejected;
+}
+
+PairingControlCodecStatus PairingControlCodec::decodeRequest(
+    const QByteArray& packet,
+    const StartupSession& expectedSession,
+    PairingControlRequest& request)
+{
+    request.clear();
+    if (packet.size() < 68
+            || packet.size() > MaximumStartupPacketBytes) {
+        return PairingControlCodecStatus::PacketOutOfBounds;
+    }
+
+    PacketReader reader(packet);
+    qint32 version;
+    qint32 messageType;
+    StartupSession session;
+    qint32 operationValue;
+    QByteArray pin;
+    QByteArray serverCertificate;
+    if (!reader.readInt32(version)
+            || version != StartupProtocolVersion
+            || !reader.readInt32(messageType)
+            || messageType != PairingRequestMessageType
+            || !readSession(reader, session)
+            || !reader.readInt32(operationValue)
+            || !readBoundedOptionalBytes(
+                reader,
+                PairingPinBytes,
+                pin)
+            || !readBoundedOptionalBytes(
+                reader,
+                MaximumServerCertificateBytes,
+                serverCertificate)
+            || !reader.atEnd()) {
+        secureZero(pin.data(), pin.size());
+        secureZero(
+            serverCertificate.data(),
+            serverCertificate.size());
+        return PairingControlCodecStatus::InvalidPacket;
+    }
+
+    if (!(session == expectedSession)) {
+        secureZero(pin.data(), pin.size());
+        secureZero(
+            serverCertificate.data(),
+            serverCertificate.size());
+        return PairingControlCodecStatus::SessionMismatch;
+    }
+
+    const auto operation =
+        static_cast<PairingControlOperation>(operationValue);
+    const bool fieldsValid =
+        (operation == PairingControlOperation::Pair
+         && isCanonicalPairingPin(pin)
+         && serverCertificate.isEmpty())
+        || (operation == PairingControlOperation::Verify
+            && pin.isEmpty()
+            && !serverCertificate.isEmpty());
+    if (!fieldsValid) {
+        secureZero(pin.data(), pin.size());
+        secureZero(
+            serverCertificate.data(),
+            serverCertificate.size());
+        return PairingControlCodecStatus::InvalidPacket;
+    }
+
+    request.m_session = session;
+    request.m_operation = operation;
+    request.m_pin = std::move(pin);
+    request.m_serverCertificate =
+        std::move(serverCertificate);
+    return PairingControlCodecStatus::Accepted;
+}
+
+PairingControlCodecStatus PairingControlCodec::encodeResponse(
+    const PairingControlResponse& response,
+    QByteArray& packet)
+{
+    secureZero(packet.data(), packet.size());
+    packet.clear();
+    const bool paired =
+        response.outcome() == PairingControlOutcome::Paired;
+    const bool fieldsValid = paired
+        ? !response.identityFormat().isEmpty()
+            && response.identityFormat().size()
+                <= MaximumIdentityFormatBytes
+            && isValidIdentityFormat(response.identityFormat())
+            && !response.identity().isEmpty()
+            && response.identity().size() <= MaximumIdentityBytes
+            && !response.serverCertificate().isEmpty()
+            && response.serverCertificate().size()
+                <= MaximumServerCertificateBytes
+        : (response.outcome()
+                == PairingControlOutcome::AlreadyPaired
+            || response.outcome()
+                == PairingControlOutcome::WrongPin
+            || response.outcome()
+                == PairingControlOutcome::Unavailable
+            || response.outcome()
+                == PairingControlOutcome::Rejected)
+            && response.identityFormat().isEmpty()
+            && response.identity().isEmpty()
+            && response.serverCertificate().isEmpty();
+    if (!fieldsValid) {
+        return PairingControlCodecStatus::InvalidPacket;
+    }
+
+    appendInt32(packet, StartupProtocolVersion);
+    appendInt32(packet, PairingResponseMessageType);
+    appendSession(packet, response.session());
+    appendInt32(
+        packet,
+        static_cast<qint32>(response.outcome()));
+    appendInt32(packet, response.identityFormat().size());
+    packet.append(response.identityFormat());
+    appendInt32(packet, response.identity().size());
+    packet.append(response.identity());
+    appendInt32(packet, response.serverCertificate().size());
+    packet.append(response.serverCertificate());
+    if (packet.size() > MaximumStartupPacketBytes) {
+        secureZero(packet.data(), packet.size());
+        packet.clear();
+        return PairingControlCodecStatus::PacketOutOfBounds;
+    }
+    return PairingControlCodecStatus::Accepted;
+}
+
 StartupChannelStatus StartupChannel::receive(
     const QString& pipeName,
     StartupPayload& payload)
@@ -1021,9 +1303,95 @@ StartupChannelStatus StartupChannel::receive(
             payload));
     secureZero(packet.data(), packet.size());
     packet.clear();
+    if (status == StartupChannelStatus::Accepted) {
+        m_pipeHandle = pipe.release();
+    }
     return status;
 #else
     Q_UNUSED(pipeName);
+    return StartupChannelStatus::PipeUnavailable;
+#endif
+}
+
+StartupChannel::~StartupChannel()
+{
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe != nullptr && pipe != INVALID_HANDLE_VALUE) {
+        CloseHandle(pipe);
+    }
+#endif
+    m_pipeHandle = nullptr;
+}
+
+StartupChannelStatus StartupChannel::receivePairingRequest(
+    const StartupSession& expectedSession,
+    PairingControlRequest& request)
+{
+    request.clear();
+    if (m_pairingUsed) {
+        return StartupChannelStatus::AlreadyUsed;
+    }
+    m_pairingUsed = true;
+
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return StartupChannelStatus::PipeUnavailable;
+    }
+
+    const ULONGLONG deadline =
+        GetTickCount64() + StartupIoTimeoutMilliseconds;
+    QByteArray packet;
+    StartupChannelStatus status = readPacket(
+        pipe,
+        deadline,
+        packet);
+    if (status == StartupChannelStatus::Accepted) {
+        status = mapPairingCodecStatus(
+            PairingControlCodec::decodeRequest(
+                packet,
+                expectedSession,
+                request));
+    }
+    secureZero(packet.data(), packet.size());
+    packet.clear();
+    m_pairingResponsePending =
+        status == StartupChannelStatus::Accepted;
+    return status;
+#else
+    Q_UNUSED(expectedSession);
+    return StartupChannelStatus::PipeUnavailable;
+#endif
+}
+
+StartupChannelStatus StartupChannel::sendPairingResponse(
+    const PairingControlResponse& response)
+{
+    if (!m_pairingResponsePending) {
+        return StartupChannelStatus::AlreadyUsed;
+    }
+    m_pairingResponsePending = false;
+
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return StartupChannelStatus::PipeUnavailable;
+    }
+
+    QByteArray packet;
+    StartupChannelStatus status = mapPairingCodecStatus(
+        PairingControlCodec::encodeResponse(response, packet));
+    if (status == StartupChannelStatus::Accepted) {
+        const ULONGLONG deadline =
+            GetTickCount64() + StartupIoTimeoutMilliseconds;
+        status = writePacket(pipe, deadline, packet);
+    }
+    secureZero(packet.data(), packet.size());
+    packet.clear();
+    return status;
+#else
+    Q_UNUSED(response);
     return StartupChannelStatus::PipeUnavailable;
 #endif
 }

@@ -89,10 +89,31 @@ empty and task-owned working directories remain clean. This is startup and
 identity-ingestion evidence only, not a production readiness or streaming
 receipt.
 
+`--argus-worker --protocol 1 --pairing-control` retains that authenticated
+pipe after startup and accepts one session-bound pairing request. Pair mode
+uses the existing `NvPairingManager` protocol with a four-digit PIN supplied
+only through the pipe, then returns the resulting exact
+`moonlight-qt.identity-v1` package and Sunshine certificate on the same
+channel. Verify mode discovers only the advertised HTTPS port over HTTP and
+then performs the paired-state request directly over pinned HTTPS; it never
+uses the ordinary helper's HTTP fallback. Wrong PIN, unavailable host,
+certificate mismatch, malformed control, duplicate exchange, and stale
+session all fail closed without retry. Ordinary interactive pairing remains
+unchanged.
+
+The task-owned Windows oracle paired a fresh generated identity with unmodified
+Sunshine `2026.516.143833`, persisted the identity/endpoint/server-certificate
+binding through the Bot-Mox protected-store port, restarted Sunshine, and
+verified the same pairing from a second fresh worker without another PIN. It
+also proved wrong-PIN, unavailable-host, wrong-certificate, listener-ownership,
+empty worker-output, and cleanup gates. This is pairing evidence only; it does
+not claim a stream or decoded frame.
+
 ## Reuse seams
 
-- Pairing must remain on the existing
-  `CliPair -> ComputerManager -> NvPairingManager -> IdentityManager` path.
+- Worker pairing reuses the existing `NvPairingManager -> IdentityManager`
+  protocol/identity core; ordinary `CliPair -> ComputerManager` behavior stays
+  unchanged and no second GameStream client is introduced.
 - A future worker frame handoff should attach after
   `avcodec_receive_frame()` in `FFmpegVideoDecoder::decoderThreadProc()` and
   before `m_Pacer->submitFrame(frame)`.
@@ -100,8 +121,8 @@ receipt.
 
 ## Remaining gates
 
-This spike is not release-ready. It still requires real Sunshine PIN pairing
-and pairing-output persistence through the existing protected store, decoded
-frame transport, real streaming/first-frame/disconnect evidence, 1920x1080
-performance evidence, and GPL/legal approval for the eventual distribution
-boundary. No release or package is published from this branch.
+This spike is not release-ready. It still requires real Sunshine
+connect/first-frame/disconnect evidence, decoded frame transport, 1920x1080
+performance evidence, packaging/SBOM/corresponding-source work, and GPL/legal
+approval for the eventual distribution boundary. No release or package is
+published from this branch.

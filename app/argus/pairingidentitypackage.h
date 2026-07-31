@@ -22,6 +22,10 @@ enum class PairingIdentityPackageStatus
 class PairingIdentityPackage
 {
 public:
+    static PairingIdentityPackageStatus encode(
+        IdentityManager& manager,
+        QByteArray& package);
+
     static PairingIdentityPackageStatus decode(
         const QString& format,
         QByteArray package,

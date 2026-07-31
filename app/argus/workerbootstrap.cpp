@@ -1,8 +1,10 @@
 #include "workerbootstrap.h"
+#include "pairingclient.h"
 #include "pairingidentitypackage.h"
 #include "startupchannel.h"
 
 #include <QCoreApplication>
+#include <QScopeGuard>
 #include <QRegularExpression>
 
 #include <cstring>
@@ -12,10 +14,17 @@ namespace
 
 constexpr int MaximumStartupPipeNameCharacters = 240;
 
-bool parseArguments(const QStringList& arguments)
+struct ParsedArguments
+{
+    bool valid = false;
+    bool pairingControl = false;
+};
+
+ParsedArguments parseArguments(const QStringList& arguments)
 {
     bool workerMode = false;
     bool protocolSet = false;
+    bool pairingControl = false;
     QString protocol;
 
     for (int index = 1; index < arguments.size(); index++) {
@@ -29,12 +38,19 @@ bool parseArguments(const QStringList& arguments)
             protocolSet = true;
             protocol = arguments.at(++index);
         }
+        else if (argument == "--pairing-control"
+                 && !pairingControl) {
+            pairingControl = true;
+        }
         else {
-            return false;
+            return {};
         }
     }
 
-    return workerMode && protocolSet && protocol == "1";
+    return {
+        workerMode && protocolSet && protocol == "1",
+        pairingControl,
+    };
 }
 
 bool isValidPipeName(const QString& pipeName)
@@ -44,6 +60,13 @@ bool isValidPipeName(const QString& pipeName)
     return !pipeName.isEmpty()
         && pipeName.size() <= MaximumStartupPipeNameCharacters
         && validName.match(pipeName).hasMatch();
+}
+
+void discardWorkerMessage(
+    QtMsgType,
+    const QMessageLogContext&,
+    const QString&)
+{
 }
 
 }
@@ -70,11 +93,18 @@ int run(int argc, char* argv[])
 
 int runStartup(const QStringList& arguments)
 {
+    const QtMessageHandler previousMessageHandler =
+        qInstallMessageHandler(discardWorkerMessage);
+    const auto restoreMessageHandler = qScopeGuard(
+        [previousMessageHandler]() {
+            qInstallMessageHandler(previousMessageHandler);
+        });
     QByteArray startupPipe =
         qgetenv(StartupPipeEnvironmentVariable);
     qunsetenv(StartupPipeEnvironmentVariable);
 
-    if (!parseArguments(arguments)) {
+    const ParsedArguments parsed = parseArguments(arguments);
+    if (!parsed.valid) {
         startupPipe.fill('\0');
         return ExitInvalidArguments;
     }
@@ -99,6 +129,8 @@ int runStartup(const QStringList& arguments)
         return ExitHandshakeUnavailable;
     }
 
+    QString endpoint = payload.endpoint();
+    const StartupSession session = payload.session();
     QString identityFormat = payload.identityFormat();
     IdentityManager::ProcessIdentity identity;
     const PairingIdentityPackageStatus packageStatus =
@@ -119,11 +151,41 @@ int runStartup(const QStringList& arguments)
     IdentityManager* manager = IdentityManager::get();
     const QSslConfiguration sslConfiguration =
         manager->getSslConfig();
-    return !manager->getUniqueId().isEmpty()
+    const bool identityReady = !manager->getUniqueId().isEmpty()
             && !sslConfiguration.localCertificate().isNull()
-            && !sslConfiguration.privateKey().isNull()
+            && !sslConfiguration.privateKey().isNull();
+    if (!identityReady) {
+        endpoint.fill(QChar('\0'));
+        endpoint.clear();
+        return ExitHandshakeUnavailable;
+    }
+    if (!parsed.pairingControl) {
+        endpoint.fill(QChar('\0'));
+        endpoint.clear();
+        return ExitSuccess;
+    }
+
+    PairingControlRequest request;
+    if (channel.receivePairingRequest(session, request)
+            != StartupChannelStatus::Accepted) {
+        endpoint.fill(QChar('\0'));
+        endpoint.clear();
+        return ExitHandshakeUnavailable;
+    }
+
+    PairingControlResponse response;
+    const PairingControlOutcome pairingOutcome =
+        executePairingControl(endpoint, request, response);
+    endpoint.fill(QChar('\0'));
+    endpoint.clear();
+    if (channel.sendPairingResponse(response)
+            != StartupChannelStatus::Accepted) {
+        return ExitHandshakeUnavailable;
+    }
+    return pairingOutcome == PairingControlOutcome::Paired
+            || pairingOutcome == PairingControlOutcome::AlreadyPaired
         ? ExitSuccess
-        : ExitHandshakeUnavailable;
+        : ExitPairingRejected;
 }
 
 }

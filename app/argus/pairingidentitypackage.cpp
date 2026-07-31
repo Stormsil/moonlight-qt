@@ -1,6 +1,7 @@
 #include "pairingidentitypackage.h"
 #include "startupchannel.h"
 
+#include <QScopeGuard>
 #include <QtEndian>
 
 #include <algorithm>
@@ -136,10 +137,73 @@ bool isCanonicalUniqueId(const QByteArray& uniqueId)
         });
 }
 
+void appendInt32(QByteArray& package, qint32 value)
+{
+    const qint32 littleEndian = qToLittleEndian(value);
+    package.append(
+        reinterpret_cast<const char*>(&littleEndian),
+        sizeof(littleEndian));
+}
+
+void appendUInt16(QByteArray& package, quint16 value)
+{
+    const quint16 littleEndian = qToLittleEndian(value);
+    package.append(
+        reinterpret_cast<const char*>(&littleEndian),
+        sizeof(littleEndian));
+}
+
+void appendField(
+    QByteArray& package,
+    quint16 type,
+    const QByteArray& value)
+{
+    appendUInt16(package, type);
+    appendInt32(package, value.size());
+    package.append(value);
+}
+
 }
 
 namespace ArgusWorker
 {
+
+PairingIdentityPackageStatus PairingIdentityPackage::encode(
+    IdentityManager& manager,
+    QByteArray& package)
+{
+    secureZero(package.data(), package.size());
+    package.clear();
+    QByteArray uniqueId = manager.getUniqueId().toLatin1();
+    QByteArray certificatePem = manager.getCertificate();
+    QByteArray privateKeyPem = manager.getPrivateKey();
+    const auto sourceZero = qScopeGuard(
+        [&uniqueId, &certificatePem, &privateKeyPem]() {
+            secureZero(uniqueId.data(), uniqueId.size());
+            secureZero(certificatePem.data(), certificatePem.size());
+            secureZero(privateKeyPem.data(), privateKeyPem.size());
+        });
+    if (!isCanonicalUniqueId(uniqueId)
+            || certificatePem.isEmpty()
+            || certificatePem.size() > MaximumCertificateBytes
+            || privateKeyPem.isEmpty()
+            || privateKeyPem.size() > MaximumPrivateKeyBytes) {
+        return PairingIdentityPackageStatus::InvalidIdentity;
+    }
+
+    package.append(Magic, MagicLength);
+    appendInt32(package, PackageVersion);
+    appendUInt16(package, FieldCount);
+    appendField(package, UniqueIdField, uniqueId);
+    appendField(package, CertificateField, certificatePem);
+    appendField(package, PrivateKeyField, privateKeyPem);
+    if (package.size() > MaximumIdentityBytes) {
+        secureZero(package.data(), package.size());
+        package.clear();
+        return PairingIdentityPackageStatus::InvalidPackage;
+    }
+    return PairingIdentityPackageStatus::Accepted;
+}
 
 PairingIdentityPackageStatus PairingIdentityPackage::decode(
     const QString& format,
