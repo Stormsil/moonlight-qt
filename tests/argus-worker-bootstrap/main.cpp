@@ -1188,8 +1188,13 @@ int main(int argc, char* argv[])
     checkCodecFailures();
     checkPairingControlCodec();
     checkStreamControlCodec();
+#if defined(ARGUS_COMMON_C_NO_INPUT)
+    check(ArgusWorker::isStreamInputIsolationSupported(),
+          "Argus patched builds must expose the verified no-input capability");
+#else
     check(!ArgusWorker::isStreamInputIsolationSupported(),
-          "Argus streaming must remain fail-closed while upstream input is unconditional");
+          "Argus pristine builds must remain fail-closed while upstream input is unconditional");
+#endif
 
 #if defined(Q_OS_WIN)
     checkFrameSlotWriter();

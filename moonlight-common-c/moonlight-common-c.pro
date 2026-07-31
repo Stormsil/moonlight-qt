@@ -38,8 +38,18 @@ unix:!macx {
     DEFINES += HAVE_CLOCK_GETTIME=1
 }
 
-COMMON_C_DIR = $$PWD/moonlight-common-c
+isEmpty(ARGUS_COMMON_C_DIR) {
+    COMMON_C_DIR = $$PWD/moonlight-common-c
+} else {
+    COMMON_C_DIR = $$clean_path($$ARGUS_COMMON_C_DIR)
+    !exists($$COMMON_C_DIR/src/Limelight.h) {
+        error("ARGUS_COMMON_C_DIR does not contain Limelight.h")
+    }
+}
 ENET_DIR = $$COMMON_C_DIR/enet
+contains(CONFIG, argus_common_c_tests) {
+    DEFINES += LC_TEST_INPUT_ISOLATION
+}
 SOURCES += \
     $$ENET_DIR/callbacks.c \
     $$ENET_DIR/compress.c \

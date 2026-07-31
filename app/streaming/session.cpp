@@ -1860,9 +1860,21 @@ bool Session::startConnectionAsync()
         m_ArgusHeadless
             ? &k_ArgusConnCallbacks
             : &k_ConnCallbacks;
-    int err = LiStartConnection(&hostInfo, &m_StreamConfig, connectionCallbacks,
+    int err;
+#if defined(ARGUS_COMMON_C_NO_INPUT)
+    if (m_ArgusHeadless) {
+        err = LiStartConnection2(&hostInfo, &m_StreamConfig, connectionCallbacks,
+                                 &m_VideoCallbacks, &m_AudioCallbacks,
+                                 NULL, 0, NULL, 0,
+                                 LI_START_FLAG_DISABLE_INPUT_STREAM);
+    }
+    else
+#endif
+    {
+        err = LiStartConnection(&hostInfo, &m_StreamConfig, connectionCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
+    }
     if (err != 0) {
         // We already displayed an error dialog in the stage failure
         // listener.

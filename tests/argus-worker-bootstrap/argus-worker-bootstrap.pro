@@ -2,6 +2,9 @@ QT += core network
 CONFIG += console testcase c++17
 CONFIG -= app_bundle
 DEFINES += ARGUS_STARTUP_CHANNEL_TESTS
+contains(CONFIG, argus_common_c_no_input) {
+    DEFINES += ARGUS_COMMON_C_NO_INPUT=1
+}
 TEMPLATE = app
 TARGET = argus-worker-bootstrap-tests
 

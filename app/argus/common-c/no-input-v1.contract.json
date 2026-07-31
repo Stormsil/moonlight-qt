@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "e41355ea01670fd4c830b384009d31dd0339a705",
+  "baseTreeSha256": "3C6DE09A833C9FB9D0B63916A9149FEA747443E885B2F0FF7197A505FCEF2ECA",
+  "patchFile": "no-input-v1.patch",
+  "patchSha256": "8CD286311B776AA5F7259F09B16128CF1D3BDE5B56D984DEC1B8BAEEAFEA8D0E",
+  "resultTreeSha256": "7CA47FDF0E9E32FE4DF96E9FB40730E87F1AC8DB397A5E1BB31C9D459F0DEEFD",
+  "submodules": {
+    "enet": "aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
+    "nanors": "b1e3c22ca0cdc0bb83e3cd6ed1a2fc77869ed99a"
+  },
+  "license": "GPL-3.0-only",
+  "distributionApproved": false,
+  "legalApproval": false
+}

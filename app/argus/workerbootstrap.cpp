@@ -98,11 +98,15 @@ bool isRequested(int argc, char* argv[])
 
 bool isStreamInputIsolationSupported()
 {
+#if defined(ARGUS_COMMON_C_NO_INPUT)
+    return true;
+#else
     // moonlight-common-c currently starts its input stream and sends two
     // mouse-wiggle packets unconditionally from LiStartConnection(). Keep the
     // Argus route fail-closed until the pinned upstream stack exposes an
     // explicit no-input connection capability.
     return false;
+#endif
 }
 
 int run(int argc, char* argv[])

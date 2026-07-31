@@ -511,8 +511,17 @@ win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../moonlight-common-c/
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../moonlight-common-c/debug/ -lmoonlight-common-c
 else:unix: LIBS += -L$$OUT_PWD/../moonlight-common-c/ -lmoonlight-common-c
 
-INCLUDEPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
-DEPENDPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
+isEmpty(ARGUS_COMMON_C_DIR) {
+    MOONLIGHT_COMMON_C_INCLUDE = $$PWD/../moonlight-common-c/moonlight-common-c/src
+} else {
+    MOONLIGHT_COMMON_C_INCLUDE = $$clean_path($$ARGUS_COMMON_C_DIR)/src
+    DEFINES += ARGUS_COMMON_C_NO_INPUT=1
+    !exists($$MOONLIGHT_COMMON_C_INCLUDE/Limelight.h) {
+        error("ARGUS_COMMON_C_DIR does not contain Limelight.h")
+    }
+}
+INCLUDEPATH += $$MOONLIGHT_COMMON_C_INCLUDE
+DEPENDPATH += $$MOONLIGHT_COMMON_C_INCLUDE
 
 win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/release/ -lqmdnsengine
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/debug/ -lqmdnsengine

@@ -7,6 +7,12 @@ SUBDIRS = \
 
 # Build the dependencies in parallel before the final app
 app.depends = qmdnsengine moonlight-common-c h264bitstream
+
+contains(CONFIG, argus_common_c_tests) {
+    SUBDIRS += argus-common-c-no-input-tests
+    argus-common-c-no-input-tests.file = tests/argus-common-c-no-input/argus-common-c-no-input.pro
+    argus-common-c-no-input-tests.depends = moonlight-common-c
+}
 win32:!winrt {
     SUBDIRS += AntiHooking
     app.depends += AntiHooking

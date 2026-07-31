@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "product": "Moonlight Qt Argus worker checkpoint",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
   "sourceBranch": "argus/headless-worker-v1",
@@ -8,7 +8,16 @@
   "historyPreserved": true,
   "capabilities": {
     "argusWorkerProtocol": 1,
-    "noInputConnection": false
+    "noInputConnection": {
+      "commonCBaseCommit": "e41355ea01670fd4c830b384009d31dd0339a705",
+      "patchPath": "app/argus/common-c/no-input-v1.patch",
+      "patchSha256": "8CD286311B776AA5F7259F09B16128CF1D3BDE5B56D984DEC1B8BAEEAFEA8D0E",
+      "resultTreeSha256": "7CA47FDF0E9E32FE4DF96E9FB40730E87F1AC8DB397A5E1BB31C9D459F0DEEFD",
+      "buildDefine": "ARGUS_COMMON_C_NO_INPUT=1",
+      "ordinaryStartApi": "LiStartConnection",
+      "argusStartApi": "LiStartConnection2",
+      "argusStartFlags": "LI_START_FLAG_DISABLE_INPUT_STREAM"
+    }
   },
   "rootLicense": {
     "spdxExpression": "GPL-3.0-only",
@@ -22,7 +31,9 @@
       "commit": "e41355ea01670fd4c830b384009d31dd0339a705",
       "license": "GPL-3.0-only",
       "licensePath": "moonlight-common-c/moonlight-common-c/LICENSE.txt",
-      "licenseSha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD"
+      "licenseSha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD",
+      "provenance": "exact base plus app/argus/common-c/no-input-v1.patch",
+      "patchedResultTreeSha256": "7CA47FDF0E9E32FE4DF96E9FB40730E87F1AC8DB397A5E1BB31C9D459F0DEEFD"
     },
     {
       "name": "ENet",

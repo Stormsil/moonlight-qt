@@ -1,0 +1,494 @@
+diff --git a/src/Connection.c b/src/Connection.c
+index bac9a6e787a806b53e6e5b1f538058d0e58ad3d5..f860f987844edef8611e750b1e97ffb11e43adeb 100644
+--- a/src/Connection.c
++++ b/src/Connection.c
+@@ -20,6 +20,13 @@ int NegotiatedVideoFormat;
+ volatile bool ConnectionInterrupted;
+ bool HighQualitySurroundSupported;
+ bool HighQualitySurroundEnabled;
++static volatile long ConnectionStartFlags;
++static bool inputInitialized;
++static bool inputStarted;
++#ifdef LC_TEST_INPUT_ISOLATION
++static uint32_t testInputInitializeCount;
++static uint32_t testInputStartCount;
++#endif
+ OPUS_MULTISTREAM_CONFIGURATION NormalQualityOpusConfig;
+ OPUS_MULTISTREAM_CONFIGURATION HighQualityOpusConfig;
+ int AudioPacketDuration;
+@@ -58,6 +65,98 @@ const char* LiGetStageName(int stage) {
+     return stageNames[stage];
+ }
+ 
++static void setConnectionStartFlags(uint32_t startFlags) {
++#ifdef _WIN32
++    InterlockedExchange(&ConnectionStartFlags, (long)startFlags);
++#else
++    __atomic_store_n(&ConnectionStartFlags, (long)startFlags, __ATOMIC_RELEASE);
++#endif
++}
++
++static uint32_t getConnectionStartFlags(void) {
++#ifdef _WIN32
++    return (uint32_t)InterlockedCompareExchange(&ConnectionStartFlags, 0, 0);
++#else
++    return (uint32_t)__atomic_load_n(&ConnectionStartFlags, __ATOMIC_ACQUIRE);
++#endif
++}
++
++bool isInputStreamDisabled(void) {
++    return (getConnectionStartFlags() & LI_START_FLAG_DISABLE_INPUT_STREAM) != 0;
++}
++
++#ifdef LC_TEST_INPUT_ISOLATION
++uint32_t LiTestGetInputInitializeCount(void) {
++    return testInputInitializeCount;
++}
++
++uint32_t LiTestGetInputStartCount(void) {
++    return testInputStartCount;
++}
++
++void LiTestResetConnectionInputIsolationCounters(void) {
++    testInputInitializeCount = 0;
++    testInputStartCount = 0;
++}
++#endif
++
++static void initializeInputForAttempt(void) {
++    if (isInputStreamDisabled()) {
++        return;
++    }
++
++    Limelog("Initializing input stream...");
++    ListenerCallbacks.stageStarting(STAGE_INPUT_STREAM_INIT);
++#ifdef LC_TEST_INPUT_ISOLATION
++    testInputInitializeCount++;
++#endif
++    initializeInputStream();
++    inputInitialized = true;
++    ListenerCallbacks.stageComplete(STAGE_INPUT_STREAM_INIT);
++    Limelog("done\n");
++}
++
++static int startInputForAttempt(void) {
++    if (isInputStreamDisabled()) {
++        return 0;
++    }
++
++    Limelog("Starting input stream...");
++    ListenerCallbacks.stageStarting(STAGE_INPUT_STREAM_START);
++#ifdef LC_TEST_INPUT_ISOLATION
++    testInputStartCount++;
++#endif
++    int err = startInputStream();
++    if (err != 0) {
++        Limelog("Input stream start failed: %d\n", err);
++        ListenerCallbacks.stageFailed(STAGE_INPUT_STREAM_START, err);
++        return err;
++    }
++    inputStarted = true;
++    ListenerCallbacks.stageComplete(STAGE_INPUT_STREAM_START);
++    Limelog("done\n");
++    return 0;
++}
++
++static void wakeDisplayForAttempt(void) {
++    if (isInputStreamDisabled()) {
++        return;
++    }
++
++    LiSendMouseMoveEvent(1, 1);
++    PltSleepMs(10);
++    LiSendMouseMoveEvent(-1, -1);
++    PltSleepMs(10);
++}
++
++#ifdef LC_TEST_INPUT_ISOLATION
++void LiTestExerciseInputStages(void) {
++    initializeInputForAttempt();
++    (void)startInputForAttempt();
++    wakeDisplayForAttempt();
++}
++#endif
++
+ // Interrupt a pending connection attempt. This interruption happens asynchronously
+ // so it is not safe to start another connection before LiStartConnection() returns.
+ void LiInterruptConnection(void) {
+@@ -74,10 +173,13 @@ void LiStopConnection(void) {
+     LiInterruptConnection();
+ 
+     if (stage == STAGE_INPUT_STREAM_START) {
+-        Limelog("Stopping input stream...");
+-        stopInputStream();
++        if (inputStarted) {
++            Limelog("Stopping input stream...");
++            stopInputStream();
++            Limelog("done\n");
++        }
++        inputStarted = false;
+         stage--;
+-        Limelog("done\n");
+     }
+     if (stage == STAGE_AUDIO_STREAM_START) {
+         Limelog("Stopping audio stream...");
+@@ -98,10 +200,13 @@ void LiStopConnection(void) {
+         Limelog("done\n");
+     }
+     if (stage == STAGE_INPUT_STREAM_INIT) {
+-        Limelog("Cleaning up input stream...");
+-        destroyInputStream();
++        if (inputInitialized) {
++            Limelog("Cleaning up input stream...");
++            destroyInputStream();
++            Limelog("done\n");
++        }
++        inputInitialized = false;
+         stage--;
+-        Limelog("done\n");
+     }
+     if (stage == STAGE_VIDEO_STREAM_INIT) {
+         Limelog("Cleaning up video stream...");
+@@ -209,6 +314,21 @@ static bool parseRtspPortNumberFromUrl(const char* rtspSessionUrl, uint16_t* por
+ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION streamConfig, PCONNECTION_LISTENER_CALLBACKS clCallbacks,
+     PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks, void* renderContext, int drFlags,
+     void* audioContext, int arFlags) {
++    return LiStartConnection2(serverInfo, streamConfig, clCallbacks,
++        drCallbacks, arCallbacks, renderContext, drFlags,
++        audioContext, arFlags, 0);
++}
++
++int LiStartConnection2(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION streamConfig, PCONNECTION_LISTENER_CALLBACKS clCallbacks,
++    PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks, void* renderContext, int drFlags,
++    void* audioContext, int arFlags, uint32_t startFlags) {
++    if ((startFlags & ~LI_START_FLAG_KNOWN_MASK) != 0) {
++        return LI_ERR_INVALID_ARGUMENT;
++    }
++
++    setConnectionStartFlags(startFlags);
++    inputInitialized = false;
++    inputStarted = false;
+     int err;
+ 
+     if (drCallbacks != NULL && (drCallbacks->capabilities & CAPABILITY_PULL_RENDERER) && drCallbacks->submitDecodeUnit) {
+@@ -471,13 +591,9 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
+     ListenerCallbacks.stageComplete(STAGE_VIDEO_STREAM_INIT);
+     Limelog("done\n");
+ 
+-    Limelog("Initializing input stream...");
+-    ListenerCallbacks.stageStarting(STAGE_INPUT_STREAM_INIT);
+-    initializeInputStream();
++    initializeInputForAttempt();
+     stage++;
+     LC_ASSERT(stage == STAGE_INPUT_STREAM_INIT);
+-    ListenerCallbacks.stageComplete(STAGE_INPUT_STREAM_INIT);
+-    Limelog("done\n");
+ 
+     Limelog("Starting control stream...");
+     ListenerCallbacks.stageStarting(STAGE_CONTROL_STREAM_START);
+@@ -518,24 +634,15 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
+     ListenerCallbacks.stageComplete(STAGE_AUDIO_STREAM_START);
+     Limelog("done\n");
+ 
+-    Limelog("Starting input stream...");
+-    ListenerCallbacks.stageStarting(STAGE_INPUT_STREAM_START);
+-    err = startInputStream();
++    err = startInputForAttempt();
+     if (err != 0) {
+-        Limelog("Input stream start failed: %d\n", err);
+-        ListenerCallbacks.stageFailed(STAGE_INPUT_STREAM_START, err);
+         goto Cleanup;
+     }
+     stage++;
+     LC_ASSERT(stage == STAGE_INPUT_STREAM_START);
+-    ListenerCallbacks.stageComplete(STAGE_INPUT_STREAM_START);
+-    Limelog("done\n");
+-    
+-    // Wiggle the mouse a bit to wake the display up
+-    LiSendMouseMoveEvent(1, 1);
+-    PltSleepMs(10);
+-    LiSendMouseMoveEvent(-1, -1);
+-    PltSleepMs(10);
++
++    // Wiggle the mouse a bit to wake the display up for ordinary attempts.
++    wakeDisplayForAttempt();
+ 
+     ListenerCallbacks.connectionStarted();
+ 
+diff --git a/src/InputStream.c b/src/InputStream.c
+index 5994836421ce66a56dd3ef860ae2c3fc5ca584c5..5e36f7f3bc283e97625e3ba11bdfb925716fd695 100644
+--- a/src/InputStream.c
++++ b/src/InputStream.c
+@@ -15,6 +15,39 @@ static PLT_THREAD inputSendThread;
+ static float absCurrentPosX;
+ static float absCurrentPosY;
+ 
++static int getInputSendStatus(void) {
++    if (isInputStreamDisabled()) {
++        return LI_ERR_INPUT_DISABLED;
++    }
++
++    return initialized ? 0 : -2;
++}
++
++#define RETURN_IF_INPUT_UNAVAILABLE() do { \
++    int inputStatus = getInputSendStatus(); \
++    if (inputStatus != 0) { \
++        return inputStatus; \
++    } \
++} while (0)
++
++#ifdef LC_TEST_INPUT_ISOLATION
++static uint32_t testControlInputSendCount;
++static uint32_t testLegacyInputConnectCount;
++
++void LiTestResetInputIsolationCounters(void) {
++    testControlInputSendCount = 0;
++    testLegacyInputConnectCount = 0;
++}
++
++uint32_t LiTestGetControlInputSendCount(void) {
++    return testControlInputSendCount;
++}
++
++uint32_t LiTestGetLegacyInputConnectCount(void) {
++    return testLegacyInputConnectCount;
++}
++#endif
++
+ // Limited by number of bits in activeGamepadMask
+ #define MAX_GAMEPADS 16
+ 
+@@ -239,6 +272,9 @@ static bool sendInputPacket(PPACKET_HOLDER holder, bool moreData) {
+     // has been removed. We send the plaintext packet through and the control stream code will do
+     // the encryption.
+     if (encryptedControlStream) {
++#ifdef LC_TEST_INPUT_ISOLATION
++        testControlInputSendCount++;
++#endif
+         err = (SOCK_RET)sendInputPacketOnControlStream((unsigned char*)&holder->packet,
+                                                         PACKET_SIZE(holder),
+                                                         holder->channelId,
+@@ -290,6 +326,9 @@ static bool sendInputPacket(PPACKET_HOLDER holder, bool moreData) {
+                        sizeof(currentAesIv));
+             }
+ 
++#ifdef LC_TEST_INPUT_ISOLATION
++            testControlInputSendCount++;
++#endif
+             err = (SOCK_RET)sendInputPacketOnControlStream((unsigned char*) encryptedBuffer,
+                                                             (int)(encryptedSize + sizeof(encryptedLengthPrefix)),
+                                                             holder->channelId,
+@@ -653,6 +692,9 @@ int startInputStream(void) {
+ 
+     // After Gen 5, we send input on the control stream
+     if (AppVersionQuad[0] < 5) {
++#ifdef LC_TEST_INPUT_ISOLATION
++        testLegacyInputConnectCount++;
++#endif
+         inputSock = connectTcpSocket(&RemoteAddr, AddrLen,
+             35043, INPUT_STREAM_TIMEOUT_SEC);
+         if (inputSock == INVALID_SOCKET) {
+@@ -708,9 +750,7 @@ int LiSendMouseMoveEvent(short deltaX, short deltaY) {
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     if (deltaX == 0 && deltaY == 0) {
+         return 0;
+@@ -775,9 +815,7 @@ int LiSendMousePositionEvent(short x, short y, short referenceWidth, short refer
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     PltLockMutex(&batchedInputMutex);
+ 
+@@ -853,9 +891,7 @@ int LiSendMouseButtonEvent(char action, int button) {
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     holder = allocatePacketHolder(0);
+     if (holder == NULL) {
+@@ -887,9 +923,7 @@ int LiSendKeyboardEvent2(short keyCode, char keyAction, char modifiers, char fla
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     holder = allocatePacketHolder(0);
+     if (holder == NULL) {
+@@ -968,9 +1002,7 @@ int LiSendUtf8TextEvent(const char *text, unsigned int length) {
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     holder = allocatePacketHolder(length);
+     if (holder == NULL) {
+@@ -1003,9 +1035,7 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
+     int err;
+     bool enqueueHolder = false;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // HACK: We previously used a short for the buttonFlags argument, but we switched to an
+     // int to support additional buttons with Sunshine. Unfortunately, some clients still pass
+@@ -1184,9 +1214,7 @@ int LiSendHighResScrollEvent(short scrollAmount) {
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     if (scrollAmount == 0) {
+         return 0;
+@@ -1284,9 +1312,7 @@ int LiSendHighResHScrollEvent(short scrollAmount) {
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // This is a protocol extension only supported with Sunshine
+     if (!IS_SUNSHINE()) {
+@@ -1328,9 +1354,7 @@ int LiSendTouchEvent(uint8_t eventType, uint32_t pointerId, float x, float y, fl
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // This is a protocol extension only supported with Sunshine
+     if (!(SunshineFeatureFlags & LI_FF_PEN_TOUCH_EVENTS)) {
+@@ -1377,9 +1401,7 @@ int LiSendPenEvent(uint8_t eventType, uint8_t toolType, uint8_t penButtons,
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // This is a protocol extension only supported with Sunshine
+     if (!(SunshineFeatureFlags & LI_FF_PEN_TOUCH_EVENTS)) {
+@@ -1428,9 +1450,7 @@ int LiSendControllerArrivalEvent(uint8_t controllerNumber, uint16_t activeGamepa
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // Sunshine supports up to 16 controllers
+     controllerNumber %= MAX_GAMEPADS;
+@@ -1475,9 +1495,7 @@ int LiSendControllerTouchEvent2(uint8_t controllerNumber, uint8_t eventType, uin
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // This is a protocol extension only supported with Sunshine
+     if (!(SunshineFeatureFlags & LI_FF_CONTROLLER_TOUCH_EVENTS)) {
+@@ -1528,9 +1546,7 @@ int LiSendControllerMotionEvent(uint8_t controllerNumber, uint8_t motionType, fl
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // Check for valid motion type values
+     if (motionType - 1 >= MAX_MOTION_EVENTS) {
+@@ -1599,9 +1615,7 @@ int LiSendControllerBatteryEvent(uint8_t controllerNumber, uint8_t batteryState,
+     PPACKET_HOLDER holder;
+     int err;
+ 
+-    if (!initialized) {
+-        return -2;
+-    }
++    RETURN_IF_INPUT_UNAVAILABLE();
+ 
+     // This is a protocol extension only supported with Sunshine
+     if (!IS_SUNSHINE()) {
+diff --git a/src/Limelight-internal.h b/src/Limelight-internal.h
+index e1314c5c618b8114c31a8bc6f61c0f5c114466cf..1d853c2b7159acf219e719c356f010fddd7f6b9f 100644
+--- a/src/Limelight-internal.h
++++ b/src/Limelight-internal.h
+@@ -25,6 +25,7 @@ extern DECODER_RENDERER_CALLBACKS VideoCallbacks;
+ extern AUDIO_RENDERER_CALLBACKS AudioCallbacks;
+ extern int NegotiatedVideoFormat;
+ extern volatile bool ConnectionInterrupted;
++bool isInputStreamDisabled(void);
+ extern bool HighQualitySurroundSupported;
+ extern bool HighQualitySurroundEnabled;
+ extern OPUS_MULTISTREAM_CONFIGURATION NormalQualityOpusConfig;
+diff --git a/src/Limelight.h b/src/Limelight.h
+index e622beaba1a7a5d474ed012abd0929d4f2aff554..bdc5d10dfa60de96e77fcfddf8826bd23cb147d6 100644
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -541,6 +541,14 @@ typedef struct _SERVER_INFORMATION {
+ // Use this function to zero the server information when allocated on the stack or heap
+ void LiInitializeServerInformation(PSERVER_INFORMATION serverInfo);
+ 
++// Additive connection-start flags. Unknown flags are rejected before side effects.
++#define LI_START_FLAG_DISABLE_INPUT_STREAM 0x00000001u
++#define LI_START_FLAG_KNOWN_MASK LI_START_FLAG_DISABLE_INPUT_STREAM
++
++// Stable errors returned by the additive connection and input-isolation APIs.
++#define LI_ERR_INVALID_ARGUMENT -5502
++#define LI_ERR_INPUT_DISABLED   -5503
++
+ // This function begins streaming.
+ //
+ // Callbacks are all optional. Pass NULL for individual callbacks within each struct or pass NULL for the entire struct
+@@ -552,6 +560,17 @@ int LiStartConnection(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION stre
+     PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks, void* renderContext, int drFlags,
+     void* audioContext, int arFlags);
+ 
++// This additive variant accepts connection-start flags. The existing
++// LiStartConnection() entry point is equivalent to calling this function with
++// startFlags set to 0 and retains its existing ABI and behavior.
++//
++// LI_START_FLAG_DISABLE_INPUT_STREAM starts video/audio without initializing
++// or establishing an input stream. All LiSend* input functions return
++// LI_ERR_INPUT_DISABLED for that attempt.
++int LiStartConnection2(PSERVER_INFORMATION serverInfo, PSTREAM_CONFIGURATION streamConfig, PCONNECTION_LISTENER_CALLBACKS clCallbacks,
++    PDECODER_RENDERER_CALLBACKS drCallbacks, PAUDIO_RENDERER_CALLBACKS arCallbacks, void* renderContext, int drFlags,
++    void* audioContext, int arFlags, uint32_t startFlags);
++
+ // This function stops streaming. This function is not thread-safe.
+ void LiStopConnection(void);
+ 

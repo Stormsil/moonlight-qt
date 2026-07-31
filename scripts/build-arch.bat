@@ -160,8 +160,12 @@ set CXXFLAGS=/GL
 set LDFLAGS=/LTCG
 
 echo Configuring the project
+set QMAKE_ARGUS_COMMON_C=
+if defined ARGUS_COMMON_C_DIR (
+    set QMAKE_ARGUS_COMMON_C="ARGUS_COMMON_C_DIR=%ARGUS_COMMON_C_DIR%"
+)
 pushd %BUILD_FOLDER%
-%QMAKE_CMD% %SOURCE_ROOT%\moonlight-qt.pro
+%QMAKE_CMD% %SOURCE_ROOT%\moonlight-qt.pro !QMAKE_ARGUS_COMMON_C!
 if !ERRORLEVEL! NEQ 0 goto Error
 popd
 
