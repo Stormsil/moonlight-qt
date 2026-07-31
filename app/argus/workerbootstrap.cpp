@@ -204,6 +204,8 @@ int runStartup(const QStringList& arguments)
             response.setOutcome(
                 session,
                 StreamControlOutcome::Rejected,
+                StreamControlPhase::RequestValidation,
+                0,
                 true);
             endpoint.fill(QChar('\0'));
             endpoint.clear();

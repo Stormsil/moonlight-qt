@@ -1570,6 +1570,9 @@ StreamControlOutcome StreamControlResponse::outcome() const
     return m_outcome;
 }
 
+StreamControlPhase StreamControlResponse::phase() const { return m_phase; }
+qint32 StreamControlResponse::failureCode() const { return m_failureCode; }
+
 qint32 StreamControlResponse::frameCount() const { return m_frameCount; }
 qint32 StreamControlResponse::width() const { return m_width; }
 qint32 StreamControlResponse::height() const { return m_height; }
@@ -1596,6 +1599,8 @@ void StreamControlResponse::setCompleted(
     clear();
     m_session = session;
     m_outcome = StreamControlOutcome::Completed;
+    m_phase = StreamControlPhase::Completed;
+    m_failureCode = 0;
     m_frameCount = frameCount;
     m_width = width;
     m_height = height;
@@ -1608,11 +1613,15 @@ void StreamControlResponse::setCompleted(
 void StreamControlResponse::setOutcome(
     const StartupSession& session,
     StreamControlOutcome outcome,
+    StreamControlPhase phase,
+    qint32 failureCode,
     bool disconnectClean)
 {
     clear();
     m_session = session;
     m_outcome = outcome;
+    m_phase = phase;
+    m_failureCode = failureCode;
     m_disconnectClean = disconnectClean;
 }
 
@@ -1620,6 +1629,8 @@ void StreamControlResponse::clear()
 {
     m_session.clear();
     m_outcome = StreamControlOutcome::Rejected;
+    m_phase = StreamControlPhase::RequestValidation;
+    m_failureCode = 0;
     m_frameCount = 0;
     m_width = 0;
     m_height = 0;
@@ -1638,7 +1649,9 @@ StreamControlCodecStatus StreamControlCodec::encodeResponse(
     const bool completed =
         response.outcome() == StreamControlOutcome::Completed;
     const bool valid = completed
-        ? response.frameCount() >= 1
+        ? response.phase() == StreamControlPhase::Completed
+            && response.failureCode() == 0
+            && response.frameCount() >= 1
             && response.width() >= 1
             && response.width() <= MaximumFrameWidth
             && response.height() >= 1
@@ -1650,7 +1663,8 @@ StreamControlCodecStatus StreamControlCodec::encodeResponse(
             && response.timestampUtcTicks()
                 >= 621355968000000000LL
             && response.disconnectClean()
-        : (response.outcome() == StreamControlOutcome::Unavailable
+        : response.phase() != StreamControlPhase::Completed
+            && (response.outcome() == StreamControlOutcome::Unavailable
             || response.outcome() == StreamControlOutcome::Rejected
             || response.outcome() == StreamControlOutcome::DecodeTimedOut)
             && response.frameCount() == 0
@@ -1667,6 +1681,8 @@ StreamControlCodecStatus StreamControlCodec::encodeResponse(
     appendInt32(packet, StreamResponseMessageType);
     appendSession(packet, response.session());
     appendInt32(packet, static_cast<qint32>(response.outcome()));
+    appendInt32(packet, static_cast<qint32>(response.phase()));
+    appendInt32(packet, response.failureCode());
     appendInt32(packet, response.frameCount());
     appendInt32(packet, response.width());
     appendInt32(packet, response.height());

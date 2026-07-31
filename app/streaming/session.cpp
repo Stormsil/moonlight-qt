@@ -1028,6 +1028,11 @@ bool Session::initializeArgusHeadless()
     return initialize(nullptr);
 }
 
+int Session::argusFailureCode() const
+{
+    return m_ArgusTerminationCode.loadAcquire();
+}
+
 Session::ArgusHeadlessOutcome Session::runArgusHeadless(
     int firstFrameTimeoutMilliseconds)
 {

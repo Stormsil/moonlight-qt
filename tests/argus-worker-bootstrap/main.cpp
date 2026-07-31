@@ -392,6 +392,8 @@ void checkStreamControlCodec()
     appendInt32(expectedResponse, 4);
     expectedResponse.append(encodeSession(session));
     appendInt32(expectedResponse, 1);
+    appendInt32(expectedResponse, 9);
+    appendInt32(expectedResponse, 0);
     appendInt32(expectedResponse, 3);
     appendInt32(expectedResponse, 1920);
     appendInt32(expectedResponse, 1080);
@@ -402,6 +404,46 @@ void checkStreamControlCodec()
     appendInt32(expectedResponse, 1);
     check(encodedResponse == expectedResponse,
           "Native stream response must match the managed byte contract");
+
+    response.setOutcome(
+        session,
+        ArgusWorker::StreamControlOutcome::Unavailable,
+        ArgusWorker::StreamControlPhase::ConnectionStart,
+        -100,
+        true);
+    check(ArgusWorker::StreamControlCodec::encodeResponse(
+              response,
+              encodedResponse)
+              == ArgusWorker::StreamControlCodecStatus::Accepted,
+          "Failed stream response must encode privacy-safe diagnostics");
+    expectedResponse.clear();
+    appendInt32(expectedResponse, ArgusWorker::StartupProtocolVersion);
+    appendInt32(expectedResponse, 4);
+    expectedResponse.append(encodeSession(session));
+    appendInt32(expectedResponse, 2);
+    appendInt32(expectedResponse, 6);
+    appendInt32(expectedResponse, -100);
+    appendInt32(expectedResponse, 0);
+    appendInt32(expectedResponse, 0);
+    appendInt32(expectedResponse, 0);
+    appendInt32(expectedResponse, 0);
+    appendInt32(expectedResponse, 0);
+    appendInt64(expectedResponse, 0);
+    appendInt64(expectedResponse, 0);
+    appendInt32(expectedResponse, 1);
+    check(encodedResponse == expectedResponse,
+          "Native stream failure diagnostics must match managed bytes");
+    response.setOutcome(
+        session,
+        ArgusWorker::StreamControlOutcome::Unavailable,
+        ArgusWorker::StreamControlPhase::Completed,
+        0,
+        true);
+    check(ArgusWorker::StreamControlCodec::encodeResponse(
+              response,
+              encodedResponse)
+              == ArgusWorker::StreamControlCodecStatus::InvalidPacket,
+          "Failed stream response must not claim the completed phase");
 }
 
 QByteArray encodePairingRequest(
@@ -1151,6 +1193,8 @@ StreamControlOutcome executeStreamControl(
     response.setOutcome(
         request.session(),
         StreamControlOutcome::Rejected,
+        StreamControlPhase::RequestValidation,
+        0,
         true);
     request.clear();
     return StreamControlOutcome::Rejected;

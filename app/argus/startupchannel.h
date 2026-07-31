@@ -9,7 +9,7 @@
 namespace ArgusWorker
 {
 
-inline constexpr int StartupProtocolVersion = 2;
+inline constexpr int StartupProtocolVersion = 3;
 inline constexpr int StartupNonceBytes = 32;
 inline constexpr int MaximumStartupPacketBytes =
     (256 * 1024) + (64 * 1024) + 8192;
@@ -269,11 +269,26 @@ enum class StreamControlOutcome
     DecodeTimedOut = 4,
 };
 
+enum class StreamControlPhase
+{
+    RequestValidation = 1,
+    ServerDiscovery = 2,
+    PairingVerification = 3,
+    ApplicationResolution = 4,
+    SessionInitialization = 5,
+    ConnectionStart = 6,
+    FirstFrameWait = 7,
+    Disconnect = 8,
+    Completed = 9,
+};
+
 class StreamControlResponse
 {
 public:
     const StartupSession& session() const;
     StreamControlOutcome outcome() const;
+    StreamControlPhase phase() const;
+    qint32 failureCode() const;
     qint32 frameCount() const;
     qint32 width() const;
     qint32 height() const;
@@ -293,12 +308,16 @@ public:
     void setOutcome(
         const StartupSession& session,
         StreamControlOutcome outcome,
+        StreamControlPhase phase,
+        qint32 failureCode,
         bool disconnectClean);
     void clear();
 
 private:
     StartupSession m_session;
     StreamControlOutcome m_outcome = StreamControlOutcome::Rejected;
+    StreamControlPhase m_phase = StreamControlPhase::RequestValidation;
+    qint32 m_failureCode = 0;
     qint32 m_frameCount = 0;
     qint32 m_width = 0;
     qint32 m_height = 0;

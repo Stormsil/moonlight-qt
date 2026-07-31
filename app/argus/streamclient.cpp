@@ -54,6 +54,8 @@ StreamControlOutcome executeStreamControl(
         response.setOutcome(
             session,
             StreamControlOutcome::Rejected,
+            StreamControlPhase::RequestValidation,
+            0,
             true);
         return StreamControlOutcome::Rejected;
     }
@@ -65,6 +67,8 @@ StreamControlOutcome executeStreamControl(
         response.setOutcome(
             session,
             StreamControlOutcome::Rejected,
+            StreamControlPhase::RequestValidation,
+            0,
             true);
         return StreamControlOutcome::Rejected;
     }
@@ -75,6 +79,8 @@ StreamControlOutcome executeStreamControl(
         response.setOutcome(
             session,
             StreamControlOutcome::Rejected,
+            StreamControlPhase::RequestValidation,
+            0,
             true);
         return StreamControlOutcome::Rejected;
     }
@@ -82,6 +88,8 @@ StreamControlOutcome executeStreamControl(
         response.setOutcome(
             session,
             StreamControlOutcome::Rejected,
+            StreamControlPhase::RequestValidation,
+            0,
             true);
         return StreamControlOutcome::Rejected;
     }
@@ -91,6 +99,8 @@ StreamControlOutcome executeStreamControl(
     });
 
     StreamControlOutcome outcome = StreamControlOutcome::Unavailable;
+    StreamControlPhase phase = StreamControlPhase::ServerDiscovery;
+    qint32 failureCode = 0;
     bool disconnectClean = true;
     try {
         NvHTTP discovery(
@@ -120,16 +130,20 @@ StreamControlOutcome executeStreamControl(
             5000,
             NvHTTP::NVLL_NONE);
         NvHTTP::verifyResponseStatus(serverInfo);
+        phase = StreamControlPhase::PairingVerification;
         if (NvHTTP::getXmlString(serverInfo, "PairStatus")
                 != QLatin1String("1")) {
             response.setOutcome(
                 session,
                 StreamControlOutcome::Rejected,
+                phase,
+                0,
                 true);
             return StreamControlOutcome::Rejected;
         }
 
         NvComputer computer(pinned, serverInfo);
+        phase = StreamControlPhase::ApplicationResolution;
         computer.appList = pinned.getAppList();
         auto appIterator = std::find_if(
             computer.appList.cbegin(),
@@ -141,6 +155,8 @@ StreamControlOutcome executeStreamControl(
             response.setOutcome(
                 session,
                 StreamControlOutcome::Rejected,
+                phase,
+                0,
                 true);
             return StreamControlOutcome::Rejected;
         }
@@ -152,17 +168,22 @@ StreamControlOutcome executeStreamControl(
                 request.height(),
                 request.framesPerSecond()));
         Session streamSession(&computer, app, preferences.get());
+        phase = StreamControlPhase::SessionInitialization;
         if (!streamSession.initializeArgusHeadless()) {
             response.setOutcome(
                 session,
                 StreamControlOutcome::Rejected,
+                phase,
+                0,
                 true);
             return StreamControlOutcome::Rejected;
         }
 
+        phase = StreamControlPhase::ConnectionStart;
         const Session::ArgusHeadlessOutcome sessionOutcome =
             streamSession.runArgusHeadless(
                 request.firstFrameTimeoutMilliseconds());
+        failureCode = streamSession.argusFailureCode();
         const DecodedFrameMetadata metadata = sink.metadata();
         switch (sessionOutcome) {
         case Session::ArgusHeadlessOutcome::FirstFrame:
@@ -178,12 +199,18 @@ StreamControlOutcome executeStreamControl(
                 return StreamControlOutcome::Completed;
             }
             outcome = StreamControlOutcome::Rejected;
+            phase = StreamControlPhase::FirstFrameWait;
             break;
         case Session::ArgusHeadlessOutcome::DecodeTimedOut:
             outcome = StreamControlOutcome::DecodeTimedOut;
+            phase = StreamControlPhase::FirstFrameWait;
             break;
         case Session::ArgusHeadlessOutcome::ConnectFailed:
+            phase = StreamControlPhase::ConnectionStart;
+            outcome = StreamControlOutcome::Unavailable;
+            break;
         case Session::ArgusHeadlessOutcome::Terminated:
+            phase = StreamControlPhase::FirstFrameWait;
             outcome = StreamControlOutcome::Unavailable;
             break;
         }
@@ -193,7 +220,12 @@ StreamControlOutcome executeStreamControl(
         disconnectClean = true;
     }
 
-    response.setOutcome(session, outcome, disconnectClean);
+    response.setOutcome(
+        session,
+        outcome,
+        phase,
+        failureCode,
+        disconnectClean);
     return outcome;
 }
 

@@ -113,6 +113,7 @@ public:
     bool initializeArgusHeadless();
     ArgusHeadlessOutcome runArgusHeadless(
         int firstFrameTimeoutMilliseconds);
+    int argusFailureCode() const;
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
     Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
