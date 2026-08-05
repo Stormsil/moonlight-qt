@@ -55,9 +55,10 @@ function Write-AtomicJson {
     $temporary = Join-Path $parent `
         ".$([IO.Path]::GetFileName($fullPath)).$([Guid]::NewGuid().ToString('N')).tmp"
     try {
+        $json = (ConvertTo-Json $Value -Depth 14).Replace("`r`n", "`n")
         [IO.File]::WriteAllText(
             $temporary,
-            "$(ConvertTo-Json $Value -Depth 14)`n",
+            "$json`n",
             [Text.UTF8Encoding]::new($false))
         [IO.File]::Move($temporary, $fullPath, $true)
     }
