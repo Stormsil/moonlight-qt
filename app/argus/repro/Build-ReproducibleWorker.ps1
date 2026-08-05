@@ -223,7 +223,8 @@ $artifactRoot = Join-Path $build 'artifact'
 New-Item -ItemType Directory -Path $objectRoot, $tempRoot, $artifactRoot | Out-Null
 $materializedCommonC = Join-Path $build 'common-c'
 & (Join-Path $source 'app\argus\common-c\Materialize-CommonC.ps1') `
-    -SourceRepository (Join-Path $source 'moonlight-common-c\moonlight-common-c') `
+    -SourceRepository (Join-Path $sourceAuthority `
+        'moonlight-common-c\moonlight-common-c') `
     -Destination $materializedCommonC | Out-Null
 
 $canonicalSource = 'Z:\argus-source'
