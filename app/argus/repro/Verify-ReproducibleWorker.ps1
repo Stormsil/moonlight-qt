@@ -12,7 +12,9 @@ param(
     [string] $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
 
     [Parameter(Mandatory = $true)]
-    [string] $ProofPath
+    [string] $ProofPath,
+
+    [switch] $UseExistingBuilds
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,10 +48,18 @@ if ($rootA -ceq $rootB) {
 }
 
 $buildScript = Join-Path $PSScriptRoot 'Build-ReproducibleWorker.ps1'
-$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRoot -SourceRoot $SourceRoot |
-    ConvertFrom-Json
-$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRoot -SourceRoot $SourceRoot |
-    ConvertFrom-Json
+if ($UseExistingBuilds) {
+    $receiptA = Get-Content -Raw -LiteralPath (Join-Path $rootA `
+        'artifact\reproducible-worker-receipt.json') | ConvertFrom-Json
+    $receiptB = Get-Content -Raw -LiteralPath (Join-Path $rootB `
+        'artifact\reproducible-worker-receipt.json') | ConvertFrom-Json
+}
+else {
+    $receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRoot `
+        -SourceRoot $SourceRoot | ConvertFrom-Json
+    $receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRoot `
+        -SourceRoot $SourceRoot | ConvertFrom-Json
+}
 
 $workerA = Join-Path $rootA 'artifact\Moonlight.exe'
 $workerB = Join-Path $rootB 'artifact\Moonlight.exe'
@@ -58,8 +68,11 @@ $bytesB = [IO.File]::ReadAllBytes($workerB)
 if (-not [Linq.Enumerable]::SequenceEqual[byte]($bytesA, $bytesB)) {
     throw 'The two clean Moonlight.exe builds are not byte-for-byte identical.'
 }
-if ($receiptA.artifact.pdbSha256 -cne $receiptB.artifact.pdbSha256) {
-    throw 'The two clean Moonlight.pdb builds are not content-identical.'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $workerA).Hash -cne
+        $receiptA.artifact.sha256 -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $workerB).Hash -cne
+        $receiptB.artifact.sha256) {
+    throw 'A worker artifact does not match its atomic build receipt.'
 }
 if ($receiptA.contractSha256 -cne $receiptB.contractSha256 -or
     $receiptA.source.forkCommit -cne $receiptB.source.forkCommit -or
@@ -73,6 +86,16 @@ if ($receiptA.buildRootIdentitySha256 -ceq
     $receiptB.buildRootIdentitySha256) {
     throw 'The two build-root identities unexpectedly match.'
 }
+
+$pdbA = Join-Path $rootA 'artifact\Moonlight.pdb'
+$pdbB = Join-Path $rootB 'artifact\Moonlight.pdb'
+$pdbTextA = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pdbA))
+$pdbTextB = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pdbB))
+$pdbContainsTaskLocalPaths =
+    $pdbTextA.Contains($rootA, [StringComparison]::OrdinalIgnoreCase) -and
+    $pdbTextB.Contains($rootB, [StringComparison]::OrdinalIgnoreCase)
+$pdbContentIdentical = $receiptA.artifact.pdbSha256 -ceq
+    $receiptB.artifact.pdbSha256
 
 $proof = [ordered]@{
     schemaVersion = 1
@@ -93,9 +116,14 @@ $proof = [ordered]@{
     }
     pdb = [ordered]@{
         fileName = 'Moonlight.pdb'
-        sha256 = $receiptA.artifact.pdbSha256
-        contentIdentical = $true
+        sha256 = @(
+            $receiptA.artifact.pdbSha256,
+            $receiptB.artifact.pdbSha256)
+        contentIdentical = $pdbContentIdentical
         embeddedPath = $receiptA.artifact.pdbAlternatePath
+        taskLocalPathsPresent = $pdbContainsTaskLocalPaths
+        canonicalArtifact = $false
+        distributed = $false
     }
     inputs = $receiptA.inputs
     source = $receiptA.source
