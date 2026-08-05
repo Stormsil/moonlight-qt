@@ -210,6 +210,26 @@ try {
         & $identityTool -QtRoot $qtA -ContractPath $unknown | Out-Null
     } '*unknown contract propert*'
 
+    $sourceA = Join-Path $temporaryRoot 'source-a'
+    $sourceB = Join-Path $temporaryRoot 'source-b'
+    $toolchain = Join-Path $temporaryRoot 'toolchain'
+    [IO.Directory]::CreateDirectory($sourceA) | Out-Null
+    [IO.Directory]::CreateDirectory($sourceB) | Out-Null
+    [IO.Directory]::CreateDirectory($toolchain) | Out-Null
+    $verifier = Join-Path $sourceRoot `
+        'app\argus\repro\Verify-ReproducibleWorker.ps1'
+    Assert-Rejected {
+        & $verifier `
+            -BuildRootA (Join-Path $temporaryRoot 'build-a') `
+            -BuildRootB (Join-Path $temporaryRoot 'build-b') `
+            -QtRootA $qtA -QtRootB $qtA `
+            -QtMaterializationReceiptA $unknown `
+            -QtMaterializationReceiptB $unknown `
+            -ToolchainRoot $toolchain `
+            -SourceRootA $sourceA -SourceRootB $sourceB `
+            -ProofPath (Join-Path $temporaryRoot 'proof.json') | Out-Null
+    } '*Qt roots must be different*'
+
     Remove-Item -LiteralPath (Join-Path $qtA 'bin\qtenv2.bat') -Force
     Assert-Rejected {
         & $identityTool -QtRoot $qtA -ContractPath $contractPath | Out-Null

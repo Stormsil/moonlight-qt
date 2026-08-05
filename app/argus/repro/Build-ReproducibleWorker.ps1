@@ -301,6 +301,21 @@ if ($LASTEXITCODE -ne 0) {
     throw "The pinned Release x64 build failed with exit $LASTEXITCODE."
 }
 
+$postBuildQtIdentity = & (Join-Path $source `
+        'app\argus\repro\Get-QtCanonicalIdentity.ps1') `
+    -QtRoot $qt -ContractPath $qtIdentityContractPath | ConvertFrom-Json
+if ($postBuildQtIdentity.schemaVersion -ne $qtIdentity.schemaVersion -or
+    $postBuildQtIdentity.algorithm -cne $qtIdentity.algorithm -or
+    $postBuildQtIdentity.contractSha256 -cne $qtIdentity.contractSha256 -or
+    $postBuildQtIdentity.canonicalTreeSha256 -cne
+        $qtIdentity.canonicalTreeSha256 -or
+    $postBuildQtIdentity.includedFileCount -ne
+        $qtIdentity.includedFileCount -or
+    $postBuildQtIdentity.excludedPaths.Count -ne 1 -or
+    $postBuildQtIdentity.excludedPaths[0] -cne 'bin/qtenv2.bat') {
+    throw 'The canonical Qt input changed while the worker was built.'
+}
+
 $workerSource = Join-Path $objectRoot 'app\release\Moonlight.exe'
 $pdbSource = Join-Path $objectRoot 'app\release\Moonlight.pdb'
 $worker = Join-Path $artifactRoot $contract.artifact.fileName
@@ -389,6 +404,7 @@ $receipt = [ordered]@{
     }
     sourceRootIdentitySha256 = Get-StringSha256 $source.ToUpperInvariant()
     buildRootIdentitySha256 = Get-StringSha256 $build.ToUpperInvariant()
+    qtRootIdentitySha256 = Get-StringSha256 $qt.ToUpperInvariant()
     artifact = [ordered]@{
         fileName = $contract.artifact.fileName
         sha256 = Get-Sha256 $worker

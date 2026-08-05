@@ -65,19 +65,24 @@ $rootA = [IO.Path]::GetFullPath($BuildRootA)
 $rootB = [IO.Path]::GetFullPath($BuildRootB)
 $sourceA = (Resolve-Path -LiteralPath $SourceRootA).Path
 $sourceB = (Resolve-Path -LiteralPath $SourceRootB).Path
+$qtA = (Resolve-Path -LiteralPath $QtRootA).Path
+$qtB = (Resolve-Path -LiteralPath $QtRootB).Path
 if ($rootA -ceq $rootB) {
     throw 'The two reproducibility build roots must be different.'
 }
 if ($sourceA -ceq $sourceB) {
     throw 'The two reproducibility source roots must be different.'
 }
+if ([string]::Equals($qtA, $qtB, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The two reproducibility Qt roots must be different.'
+}
 
 $buildScript = Join-Path $PSScriptRoot 'Build-ReproducibleWorker.ps1'
-$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRootA `
+$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $qtA `
     -QtMaterializationReceiptPath $QtMaterializationReceiptA `
     -ToolchainRoot $ToolchainRoot -SourceRoot $sourceA `
     -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
-$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRootB `
+$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $qtB `
     -QtMaterializationReceiptPath $QtMaterializationReceiptB `
     -ToolchainRoot $ToolchainRoot -SourceRoot $sourceB `
     -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
@@ -126,6 +131,10 @@ if ($receiptA.buildRootIdentitySha256 -ceq
     $receiptB.buildRootIdentitySha256) {
     throw 'The two build-root identities unexpectedly match.'
 }
+if ($receiptA.qtRootIdentitySha256 -ceq
+    $receiptB.qtRootIdentitySha256) {
+    throw 'The two Qt-root identities unexpectedly match.'
+}
 
 $pdbA = Join-Path $rootA 'artifact\Moonlight.pdb'
 $pdbB = Join-Path $rootB 'artifact\Moonlight.pdb'
@@ -151,12 +160,16 @@ $proof = [ordered]@{
     cleanBuildCount = 2
     absoluteRootsDistinct = $true
     absoluteSourceRootsDistinct = $true
+    absoluteQtRootsDistinct = $true
     buildRootIdentitySha256 = @(
         $receiptA.buildRootIdentitySha256,
         $receiptB.buildRootIdentitySha256)
     sourceRootIdentitySha256 = @(
         $receiptA.sourceRootIdentitySha256,
         $receiptB.sourceRootIdentitySha256)
+    qtRootIdentitySha256 = @(
+        $receiptA.qtRootIdentitySha256,
+        $receiptB.qtRootIdentitySha256)
     worker = [ordered]@{
         fileName = 'Moonlight.exe'
         sha256 = $receiptA.artifact.sha256

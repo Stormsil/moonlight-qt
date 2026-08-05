@@ -126,6 +126,14 @@ Updater.update(TargetConfig("6.11.1", "desktop", "win64_msvc2022_64", "windows")
 
     $qtIdentity = & $identityTool -QtRoot $qtRoot `
         -ContractPath $identityContract | ConvertFrom-Json
+    & $objectReceiptTool -UpdatesXmlPath $updatesXml `
+        -ArchiveDirectory $archiveRoot -ContractPath $objectContract `
+        -OutputPath $temporaryReceipt
+    $postExtractionReceiptHash = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $temporaryReceipt).Hash
+    if ($postExtractionReceiptHash -cne $expectedReceiptHash) {
+        throw 'A Qt package object changed while it was extracted.'
+    }
     $materializationReceipt = [ordered]@{
         schemaVersion = 1
         packageObjectReceiptSha256 = $expectedReceiptHash
@@ -138,6 +146,10 @@ Updater.update(TargetConfig("6.11.1", "desktop", "win64_msvc2022_64", "windows")
             excludedPaths = @($qtIdentity.excludedPaths)
             includedFileCount = $qtIdentity.includedFileCount
         }
+        qtRootIdentitySha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+                [Text.Encoding]::UTF8.GetBytes(
+                    ([IO.Path]::GetFullPath($qtRoot)).ToUpperInvariant())))
     }
     Write-AtomicJson $materializationReceipt $OutputReceiptPath
 }
