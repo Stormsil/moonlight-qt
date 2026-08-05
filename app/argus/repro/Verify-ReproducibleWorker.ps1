@@ -9,12 +9,20 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $QtRoot,
 
-    [string] $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
+    [Parameter(Mandatory = $true)]
+    [string] $ToolchainRoot,
 
     [Parameter(Mandatory = $true)]
-    [string] $ProofPath,
+    [string] $SourceRootA,
 
-    [switch] $UseExistingBuilds
+    [Parameter(Mandatory = $true)]
+    [string] $SourceRootB,
+
+    [string] $SourceAuthorityRoot = (Resolve-Path (
+        Join-Path $PSScriptRoot '..\..\..')).Path,
+
+    [Parameter(Mandatory = $true)]
+    [string] $ProofPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,22 +51,25 @@ function Write-AtomicJson {
 
 $rootA = [IO.Path]::GetFullPath($BuildRootA)
 $rootB = [IO.Path]::GetFullPath($BuildRootB)
+$sourceA = (Resolve-Path -LiteralPath $SourceRootA).Path
+$sourceB = (Resolve-Path -LiteralPath $SourceRootB).Path
 if ($rootA -ceq $rootB) {
     throw 'The two reproducibility build roots must be different.'
 }
+if ($sourceA -ceq $sourceB) {
+    throw 'The two reproducibility source roots must be different.'
+}
 
 $buildScript = Join-Path $PSScriptRoot 'Build-ReproducibleWorker.ps1'
-if ($UseExistingBuilds) {
-    $receiptA = Get-Content -Raw -LiteralPath (Join-Path $rootA `
-        'artifact\reproducible-worker-receipt.json') | ConvertFrom-Json
-    $receiptB = Get-Content -Raw -LiteralPath (Join-Path $rootB `
-        'artifact\reproducible-worker-receipt.json') | ConvertFrom-Json
-}
-else {
-    $receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRoot `
-        -SourceRoot $SourceRoot | ConvertFrom-Json
-    $receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRoot `
-        -SourceRoot $SourceRoot | ConvertFrom-Json
+$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRoot `
+    -ToolchainRoot $ToolchainRoot -SourceRoot $sourceA `
+    -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
+$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRoot `
+    -ToolchainRoot $ToolchainRoot -SourceRoot $sourceB `
+    -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
+
+if ($receiptA.schemaVersion -ne 1 -or $receiptB.schemaVersion -ne 1) {
+    throw 'A build returned an unsupported atomic receipt.'
 }
 
 $workerA = Join-Path $rootA 'artifact\Moonlight.exe'
@@ -79,8 +90,18 @@ if ($receiptA.contractSha256 -cne $receiptB.contractSha256 -or
     $receiptA.source.sourceTree -cne $receiptB.source.sourceTree -or
     $receiptA.inputs.qtTreeSha256 -cne $receiptB.inputs.qtTreeSha256 -or
     $receiptA.inputs.dependencyTreeSha256 -cne
-        $receiptB.inputs.dependencyTreeSha256) {
+        $receiptB.inputs.dependencyTreeSha256 -or
+    $receiptA.inputs.msvcTreeSha256 -cne
+        $receiptB.inputs.msvcTreeSha256 -or
+    $receiptA.inputs.windowsSdkTreeSha256 -cne
+        $receiptB.inputs.windowsSdkTreeSha256 -or
+    $receiptA.source.materializedTreeSha256 -cne
+        $receiptB.source.materializedTreeSha256) {
     throw 'The two builds did not use the same pinned source and input contract.'
+}
+if ($receiptA.sourceRootIdentitySha256 -ceq
+        $receiptB.sourceRootIdentitySha256) {
+    throw 'The two source-root identities unexpectedly match.'
 }
 if ($receiptA.buildRootIdentitySha256 -ceq
     $receiptB.buildRootIdentitySha256) {
@@ -106,6 +127,9 @@ $proof = [ordered]@{
     buildRootIdentitySha256 = @(
         $receiptA.buildRootIdentitySha256,
         $receiptB.buildRootIdentitySha256)
+    sourceRootIdentitySha256 = @(
+        $receiptA.sourceRootIdentitySha256,
+        $receiptB.sourceRootIdentitySha256)
     worker = [ordered]@{
         fileName = 'Moonlight.exe'
         sha256 = $receiptA.artifact.sha256
@@ -128,6 +152,19 @@ $proof = [ordered]@{
     inputs = $receiptA.inputs
     source = $receiptA.source
     environment = $receiptA.environment
+    buildReceipts = @(
+        [ordered]@{
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
+                    Join-Path $rootA `
+                        'artifact\reproducible-worker-receipt.json')).Hash
+            receipt = $receiptA
+        },
+        [ordered]@{
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
+                    Join-Path $rootB `
+                        'artifact\reproducible-worker-receipt.json')).Hash
+            receipt = $receiptB
+        })
 }
 Write-AtomicJson $proof $ProofPath
 $proof | ConvertTo-Json -Depth 12

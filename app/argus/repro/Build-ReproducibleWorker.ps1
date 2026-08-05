@@ -6,7 +6,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $QtRoot,
 
-    [string] $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    [Parameter(Mandatory = $true)]
+    [string] $ToolchainRoot,
+
+    [string] $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
+
+    [string] $SourceAuthorityRoot = $SourceRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,15 +47,21 @@ function Get-StringSha256 {
 }
 
 function Get-TreeSha256 {
-    param([string] $Root)
+    param(
+        [string] $Root,
+        [switch] $ExcludeGitMetadata)
 
     $rootPath = (Resolve-Path -LiteralPath $Root).Path
     $paths = [Collections.Generic.List[string]]::new()
     Get-ChildItem -LiteralPath $rootPath -Recurse -File -Force |
         ForEach-Object {
-            $paths.Add([IO.Path]::GetRelativePath(
-                    $rootPath,
-                    $_.FullName).Replace('\', '/'))
+            $relative = [IO.Path]::GetRelativePath(
+                $rootPath,
+                $_.FullName).Replace('\', '/')
+            if (-not $ExcludeGitMetadata -or
+                -not ($relative.Split('/') -ccontains '.git')) {
+                $paths.Add($relative)
+            }
         }
     $ordered = $paths.ToArray()
     [Array]::Sort($ordered, [StringComparer]::Ordinal)
@@ -101,7 +112,9 @@ function Write-AtomicJson {
 }
 
 $source = (Resolve-Path -LiteralPath $SourceRoot).Path
+$sourceAuthority = (Resolve-Path -LiteralPath $SourceAuthorityRoot).Path
 $qt = (Resolve-Path -LiteralPath $QtRoot).Path
+$toolchain = (Resolve-Path -LiteralPath $ToolchainRoot).Path
 $build = [IO.Path]::GetFullPath($BuildRoot)
 if (-not [IO.Path]::IsPathFullyQualified($BuildRoot)) {
     throw 'BuildRoot must be an absolute path.'
@@ -110,7 +123,7 @@ if (Test-Path -LiteralPath $build) {
     throw 'BuildRoot must not exist; reproducible builds always start clean.'
 }
 
-$contractPath = Join-Path $PSScriptRoot 'reproducible-worker-v1.json'
+$contractPath = Join-Path $source 'app\argus\repro\reproducible-worker-v1.json'
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
 if ($contract.schemaVersion -ne 1 -or
     $contract.configuration -cne 'release' -or
@@ -118,11 +131,13 @@ if ($contract.schemaVersion -ne 1 -or
     throw 'The reproducible worker contract is unsupported.'
 }
 
-$repositoryRoot = @(Invoke-Git $source @('rev-parse', '--show-toplevel'))[-1].Trim()
-if ([IO.Path]::GetFullPath($repositoryRoot) -cne [IO.Path]::GetFullPath($source)) {
-    throw 'SourceRoot must be the Moonlight repository root.'
+$repositoryRoot = @(Invoke-Git $sourceAuthority @(
+        'rev-parse', '--show-toplevel'))[-1].Trim()
+if ([IO.Path]::GetFullPath($repositoryRoot) -cne
+    [IO.Path]::GetFullPath($sourceAuthority)) {
+    throw 'SourceAuthorityRoot must be the Moonlight repository root.'
 }
-$status = @(Invoke-Git $source @(
+$status = @(Invoke-Git $sourceAuthority @(
         'status',
         '--porcelain=v1',
         '--untracked-files=all',
@@ -130,11 +145,12 @@ $status = @(Invoke-Git $source @(
 if ($status.Count -ne 0) {
     throw 'The Moonlight repository must be clean before a reproducible build.'
 }
-$autoCrlf = @(Invoke-Git $source @('config', '--get', 'core.autocrlf'))
+$autoCrlf = @(Invoke-Git $sourceAuthority @(
+        'config', '--get', 'core.autocrlf'))
 if ($autoCrlf.Count -ne 1 -or $autoCrlf[0].Trim() -cne 'false') {
     throw 'core.autocrlf must be false for the canonical source checkout.'
 }
-$patchEol = @(Invoke-Git $source @(
+$patchEol = @(Invoke-Git $sourceAuthority @(
         'ls-files',
         '--eol',
         'app/argus/common-c/no-input-v1.patch'))[-1]
@@ -142,17 +158,25 @@ if ($patchEol -cnotmatch 'i/lf\s+w/lf\s+attr/text eol=lf') {
     throw 'The no-input patch must be checked out with canonical LF bytes.'
 }
 
-& git -C $source merge-base --is-ancestor $contract.source.requiredAncestor HEAD
+& git -C $sourceAuthority merge-base --is-ancestor `
+    $contract.source.requiredAncestor HEAD
 if ($LASTEXITCODE -ne 0) {
     throw 'The accepted Argus worker source is not an ancestor of HEAD.'
 }
-& git -C $source merge-base --is-ancestor $contract.source.upstreamCommit HEAD
+& git -C $sourceAuthority merge-base --is-ancestor `
+    $contract.source.upstreamCommit HEAD
 if ($LASTEXITCODE -ne 0) {
     throw 'The pinned upstream Moonlight commit is not an ancestor of HEAD.'
 }
 
 $patchPath = Join-Path $source 'app\argus\common-c\no-input-v1.patch'
 Assert-Hash $patchPath $contract.source.commonCPatchSha256 'common-c patch'
+
+$authorityTreeSha256 = Get-TreeSha256 $sourceAuthority -ExcludeGitMetadata
+$sourceTreeSha256 = Get-TreeSha256 $source -ExcludeGitMetadata
+if ($sourceTreeSha256 -cne $authorityTreeSha256) {
+    throw 'The materialized build source does not match the clean authority tree.'
+}
 
 $qmake = Join-Path $qt 'bin\qmake.exe'
 Assert-Hash $qmake $contract.qt.qmakeSha256 'qmake.exe'
@@ -172,25 +196,21 @@ if ($dependencyTreeSha256 -cne $contract.dependencies.treeSha256) {
 }
 
 $jom = Join-Path $source 'scripts\jom.exe'
-$vswhere = Join-Path $source 'scripts\vswhere.exe'
 Assert-Hash $jom $contract.repositoryTools.'jom.exe' 'jom.exe'
-Assert-Hash $vswhere $contract.repositoryTools.'vswhere.exe' 'vswhere.exe'
-$vsInstall = (& $vswhere -latest -property installationPath).Trim()
-$vsVersion = (& $vswhere -latest -property installationVersion).Trim()
-if ($vsVersion -cne $contract.visualStudio.installationVersion) {
-    throw 'The Visual Studio installation version drifted.'
+$msvc = Join-Path $toolchain 'msvc'
+$windowsSdk = Join-Path $toolchain 'windows-sdk'
+if ((Get-TreeSha256 $msvc) -cne $contract.msvc.treeSha256) {
+    throw 'The task-local MSVC input tree drifted.'
 }
-
-$vcBin = Join-Path $vsInstall (
-    "VC\Tools\MSVC\$($contract.visualStudio.vcToolsVersion)\bin\Hostx64\x64")
-foreach ($toolName in $contract.visualStudio.tools.PSObject.Properties.Name) {
+if ((Get-TreeSha256 $windowsSdk) -cne $contract.windowsSdk.treeSha256) {
+    throw 'The task-local Windows SDK input tree drifted.'
+}
+$vcBin = Join-Path $msvc 'bin\Hostx64\x64'
+foreach ($toolName in $contract.msvc.tools.PSObject.Properties.Name) {
     Assert-Hash (Join-Path $vcBin $toolName) `
-        $contract.visualStudio.tools.$toolName "MSVC $toolName"
+        $contract.msvc.tools.$toolName "MSVC $toolName"
 }
-$vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvarsall.bat'
-
-$sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10'
-$sdkBin = Join-Path $sdkRoot "bin\$($contract.windowsSdk.version)\x64"
+$sdkBin = Join-Path $windowsSdk 'bin\x64'
 foreach ($toolName in $contract.windowsSdk.tools.PSObject.Properties.Name) {
     Assert-Hash (Join-Path $sdkBin $toolName) `
         $contract.windowsSdk.tools.$toolName "Windows SDK $toolName"
@@ -215,12 +235,16 @@ $commandPath = Join-Path $build 'build.cmd'
 $commandLines = @(
     '@echo off',
     'setlocal DisableDelayedExpansion',
-    "call `"$vcvars`" amd64 >nul || exit /b 1",
     'set "CL="',
     'set "_CL_="',
     'set "LINK="',
     'set "_LINK_="',
-    "set `"PATH=$(Join-Path $qt 'bin');%PATH%`"",
+    "set `"PATH=$(Join-Path $qt 'bin');$vcBin;$sdkBin;%SystemRoot%\System32;%SystemRoot%`"",
+    "set `"INCLUDE=$(Join-Path $msvc 'include');$(Join-Path $windowsSdk 'Include\ucrt');$(Join-Path $windowsSdk 'Include\shared');$(Join-Path $windowsSdk 'Include\um');$(Join-Path $windowsSdk 'Include\winrt');$(Join-Path $windowsSdk 'Include\cppwinrt')`"",
+    "set `"LIB=$(Join-Path $msvc 'lib\x64');$(Join-Path $windowsSdk 'Lib\ucrt\x64');$(Join-Path $windowsSdk 'Lib\um\x64')`"",
+    "set `"VCToolsInstallDir=$msvc\`"",
+    "set `"WindowsSdkDir=$windowsSdk\`"",
+    "set `"WindowsSDKVersion=$($contract.windowsSdk.version)\`"",
     "set `"TEMP=$tempRoot`"",
     "set `"TMP=$tempRoot`"",
     "set `"TZ=$($contract.environment.timezone)`"",
@@ -261,7 +285,12 @@ if (($headers -join "`n") -cnotmatch [Regex]::Escape(
 }
 $workerText = [Text.Encoding]::ASCII.GetString(
     [IO.File]::ReadAllBytes($worker))
-foreach ($forbiddenPath in @($source, $build, $qt, $materializedCommonC)) {
+foreach ($forbiddenPath in @(
+        $source,
+        $build,
+        $qt,
+        $toolchain,
+        $materializedCommonC)) {
     if ($workerText.Contains($forbiddenPath, [StringComparison]::OrdinalIgnoreCase) -or
         $workerText.Contains(
             $forbiddenPath.Replace('\', '/'),
@@ -274,11 +303,15 @@ $receipt = [ordered]@{
     schemaVersion = 1
     contractSha256 = Get-Sha256 $contractPath
     source = [ordered]@{
-        forkCommit = @(Invoke-Git $source @('rev-parse', 'HEAD'))[-1].Trim()
-        sourceTree = @(Invoke-Git $source @('rev-parse', 'HEAD^{tree}'))[-1].Trim()
+        forkCommit = @(Invoke-Git $sourceAuthority @(
+                'rev-parse', 'HEAD'))[-1].Trim()
+        sourceTree = @(Invoke-Git $sourceAuthority @(
+                'rev-parse', 'HEAD^{tree}'))[-1].Trim()
+        materializedTreeSha256 = $sourceTreeSha256
         requiredAncestor = $contract.source.requiredAncestor
         upstreamCommit = $contract.source.upstreamCommit
-        submodules = @(Invoke-Git $source @('submodule', 'status', '--recursive'))
+        submodules = @(Invoke-Git $sourceAuthority @(
+                'submodule', 'status', '--recursive'))
         commonCBaseCommit = $contract.source.commonCBaseCommit
         commonCPatchSha256 = $contract.source.commonCPatchSha256
         commonCResultTreeSha256 = $contract.source.commonCResultTreeSha256
@@ -288,10 +321,11 @@ $receipt = [ordered]@{
         qtTreeSha256 = $qtTreeSha256
         dependencyReleaseTag = $contract.dependencies.releaseTag
         dependencyTreeSha256 = $dependencyTreeSha256
-        visualStudioVersion = $vsVersion
-        vcToolsVersion = $contract.visualStudio.vcToolsVersion
-        compilerVersion = $contract.visualStudio.compilerVersion
+        msvcTreeSha256 = $contract.msvc.treeSha256
+        vcToolsVersion = $contract.msvc.toolsVersion
+        compilerVersion = $contract.msvc.compilerVersion
         windowsSdkVersion = $contract.windowsSdk.version
+        windowsSdkTreeSha256 = $contract.windowsSdk.treeSha256
         repositoryTools = $contract.repositoryTools
     }
     environment = [ordered]@{
@@ -299,11 +333,12 @@ $receipt = [ordered]@{
         sourceDateEpochHonoredByMsvc = $false
         timezone = $contract.environment.timezone
         visualStudioLanguage = $contract.environment.visualStudioLanguage
-        compilerFlags = $compilerFlags
+        compilerFlags = "$($contract.environment.compilerFlags) /pathmap:<source>=$canonicalSource /pathmap:<build>=$canonicalBuild"
         linkerFlags = $linkerFlags
         canonicalSourcePath = $canonicalSource
         canonicalBuildPath = $canonicalBuild
     }
+    sourceRootIdentitySha256 = Get-StringSha256 $source.ToUpperInvariant()
     buildRootIdentitySha256 = Get-StringSha256 $build.ToUpperInvariant()
     artifact = [ordered]@{
         fileName = $contract.artifact.fileName
