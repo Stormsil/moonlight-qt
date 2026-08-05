@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "packageObjectReceiptSha256": "BA123F16C09445C65B4A2D06B976D9FB440D978D420F09D6EB836FE5D1C11C48",
+  "archiveSetSha256": "5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02",
+  "qtIdentity": {
+    "schemaVersion": 1,
+    "algorithm": "sha256-relative-path-nul-content-sha256-lf-v1",
+    "contractSha256": "0D29620DAD0A9FCA826EC015401AC1C0AA2EAF3AB4A6BCE33B021854AE3CAD5F",
+    "canonicalTreeSha256": "B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8",
+    "excludedPaths": [
+      "bin/qtenv2.bat"
+    ],
+    "includedFileCount": 10880
+  }
+}
