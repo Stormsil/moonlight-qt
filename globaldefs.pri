@@ -7,6 +7,11 @@ CONFIG += force_debug_info
 # Disable asserts on release builds
 CONFIG(release, debug|release) {
     DEFINES += NDEBUG
+
+    *-msvc {
+        # Make the PE timestamp and CodeView identifier content-derived.
+        QMAKE_LFLAGS += /Brepro
+    }
 }
 
 # Enable CFG, EHCont, and CET

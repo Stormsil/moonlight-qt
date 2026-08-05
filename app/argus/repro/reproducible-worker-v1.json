@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "configuration": "release",
+  "architecture": "x64",
+  "source": {
+    "repository": "https://github.com/Stormsil/moonlight-qt",
+    "requiredAncestor": "c85d3ad08d50945a93c52882aec167869119b5e1",
+    "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
+    "commonCBaseCommit": "e41355ea01670fd4c830b384009d31dd0339a705",
+    "commonCPatchSha256": "8CD286311B776AA5F7259F09B16128CF1D3BDE5B56D984DEC1B8BAEEAFEA8D0E",
+    "commonCResultTreeSha256": "7CA47FDF0E9E32FE4DF96E9FB40730E87F1AC8DB397A5E1BB31C9D459F0DEEFD"
+  },
+  "qt": {
+    "version": "6.11.1",
+    "target": "msvc2022_64",
+    "treeSha256": "815FFFB3BF1F43FCE227E74CAD61C0B13DA37540811DC5B7ECAAEE534C524A9D",
+    "qmakeSha256": "B208F3AEAECE4731772743D54C8CFEC81C74E5AC8AB4A26D7E058E4628B15EF2"
+  },
+  "dependencies": {
+    "repository": "https://github.com/moonlight-stream/moonlight-qt-deps",
+    "releaseTag": "v10",
+    "treeSha256": "195EFB527A1E3B66EC3A36DFA6D4057FC86384873F957B0A04C72854F1BE8E2E"
+  },
+  "visualStudio": {
+    "installationVersion": "18.8.12021.73",
+    "vcToolsVersion": "14.51.36231",
+    "compilerVersion": "19.51.36252",
+    "tools": {
+      "cl.exe": "C94CDAC6A780142920110E5CB8B7339817029EEAD696E0E97700B45E03216A00",
+      "c1xx.dll": "55E5C330762DD74223201822CF4A6B93CD4EF2307651FA8855BBC6D8E4899315",
+      "c2.dll": "B085BF8E44C31DC5D14A4D30C9D62E00BD4764C58E54DCDE80880BE183FA2558",
+      "link.exe": "F233B8E337CEC96A69868A8CDE676808BFA81152493968D0B27B7CD0DAAC15BE",
+      "mspdbcore.dll": "04CE00EB27CEC72C27FD6ED8A71D996F41C6FE8BE56DC199986601C6E8CF0A41",
+      "dumpbin.exe": "D0ED426B928FCF322254017822EDD74EDAB6014772CA5098F2583782AC8D965D"
+    }
+  },
+  "windowsSdk": {
+    "version": "10.0.26100.0",
+    "tools": {
+      "rc.exe": "65DB0D7B4F10BA0F55973FD9356543A556DA9EC1C777A0C05F05A0329C8A100A",
+      "mt.exe": "FB1AB75294B78619BD6AC8CADF30CB95BEFBC7324703CBE2654EF800DDD2BF4D"
+    }
+  },
+  "repositoryTools": {
+    "jom.exe": "93EB6B9DF1A61B75F8D279578B200706A98096D85773AE3A09BBEFEA365CC2E8",
+    "vswhere.exe": "C54F3B7C9164EA9A0DB8641E81ECDDA80C2664EF5A47C4191406F848CC07C662"
+  },
+  "environment": {
+    "sourceDateEpoch": "1785528916",
+    "timezone": "UTC",
+    "visualStudioLanguage": "1033",
+    "compilerFlags": "/GL /ZH:SHA_256",
+    "linkerFlags": "/LTCG /Brepro",
+    "sourceDateEpochHonoredByMsvc": false
+  },
+  "artifact": {
+    "fileName": "Moonlight.exe",
+    "pdbFileName": "Moonlight.pdb",
+    "pdbAlternatePath": "Moonlight.pdb",
+    "peReproDebugEntryRequired": true
+  }
+}
