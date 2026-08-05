@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "scope": "argus-reproducible-worker-release-x64",
+  "callGraph": {
+    "entryPoint": "app/argus/repro/Verify-ReproducibleWorker.ps1",
+    "entryPointSha256": "CBC0302140F58AF2ECCDFD9D990DCDB1B8A6EDC972DFC39624DBA779171F485A",
+    "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
+    "buildScriptSha256": "C7FE9B2515460CE7F38C87C2B54BF36D52643B4FE91DA6555B4F4056AF180517",
+    "releaseX64Commands": [
+      "<qt-root>/bin/qmake.exe -o Makefile <source-root>/moonlight-qt.pro ARGUS_COMMON_C_DIR=<materialized-common-c>",
+      "<source-root>/scripts/jom.exe -f Makefile release"
+    ],
+    "qtenv2Invoked": false,
+    "repositoryBuildArchScriptSha256": "F7A9D8CFF97CADF59DE566E08FAD5CC47F2261429D15AF5541134648490DA271",
+    "repositoryBuildArchInvokesQmakeFromPath": true,
+    "repositoryBuildArchInvokesQtenv2": false
+  },
+  "fileIoOracle": {
+    "collector": "wpr.exe -start FileIO -filemode",
+    "traceSha256": "30C1B3224AC3ACCEF85AEF1A3627E0BB1B97E9410D781E83A90FD6E34B2A6808",
+    "traceLength": 12559843328,
+    "durationMicroseconds": 520359897,
+    "lostBuffers": 0,
+    "lostEvents": 0,
+    "query": "xperf.exe -quiet -i <trace> -tle -tti -a dumper -range <start-us> <end-us> | rg <exact-root-qmake-or-qtenv2>",
+    "windows": [
+      {
+        "root": "build-a",
+        "startMicroseconds": 150000000,
+        "endMicroseconds": 175000000,
+        "queryExitCode": 0,
+        "derivedSha256": "320A3CFFF29B93FB1CD4F828B697D4E4AD14302D958D138566A6AAE9C63725BF",
+        "derivedLength": 447947,
+        "qmakeMatchingTextRows": 1226,
+        "qtenv2MatchingTextRows": 0
+      },
+      {
+        "root": "build-b",
+        "startMicroseconds": 404000000,
+        "endMicroseconds": 430000000,
+        "queryExitCode": 0,
+        "derivedSha256": "792C964B7E63DE7E3371CD75EA99B3BC89CF2658A79615499796DDB67D793A82",
+        "derivedLength": 500120,
+        "qmakeMatchingTextRows": 1350,
+        "qtenv2MatchingTextRows": 0
+      }
+    ],
+    "qmakeExecutionObserved": true,
+    "qtenv2AccessObservedInBuildWindows": false
+  },
+  "threeRootIdentity": {
+    "packageObjectReceiptSha256": "BA123F16C09445C65B4A2D06B976D9FB440D978D420F09D6EB836FE5D1C11C48",
+    "archiveSetSha256": "5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02",
+    "materializationReceiptSha256": "73BCFB237F69D2738EF3FFCB70402B061796BBFDF4A58B1E0BEB192DF0B5533A",
+    "canonicalTreeSha256": "B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8",
+    "qtenv2Sha256": [
+      "7877B5810F53F301DA5D4827D196D9F51B9C36F58CBF93F2574C64D6A493EB68",
+      "BBB73EC88191AF8D715BAFDF994DDE5BD2DFF08C51247F533B66249C8B6FFE10",
+      "E0247694E4B54FFF2AB3651276AD1A23CDDD3EE8A93791C1628FB7A04A388143"
+    ],
+    "admissionRootParticipatesInBuild": false
+  },
+  "conclusion": {
+    "excludedPath": "bin/qtenv2.bat",
+    "classification": "qt-generated-environment-launcher",
+    "releaseX64BuildConsumption": "proven-unused",
+    "otherQtFilesExcluded": false
+  }
+}
