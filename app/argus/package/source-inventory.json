@@ -1,14 +1,27 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "product": "content-addressed Moonlight Qt Argus worker",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
-  "sourceBranch": "chore/issue-967-reproducible-worker",
-  "artifactSourceCommit": "b20fa0c2e7a0b7517b5b04e3ad06511fa4545df4",
-  "artifactSourceTree": "97b2fec093ec223a49273013cc0f32de7d18ee3c",
+  "sourceBranch": "fix/issue-969-portable-qt-identity",
+  "artifactSourceCommit": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
+  "artifactSourceTree": "743dcb4c876749f786cbbe83857d90a3b0b27754",
   "artifactSha256": "C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385",
   "upstreamRepository": "https://github.com/moonlight-stream/moonlight-qt",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "historyPreserved": true,
+  "qtInput": {
+    "version": "6.11.1",
+    "target": "msvc2022_64",
+    "packageObjectContractSha256": "ECBE37C2E4CEF7B049C145AE6F6B8B66FAE41AAD0C1E8CCDC5EC284AC7662275",
+    "packageObjectReceiptSha256": "BA123F16C09445C65B4A2D06B976D9FB440D978D420F09D6EB836FE5D1C11C48",
+    "archiveSetSha256": "5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02",
+    "canonicalIdentityContractSha256": "0D29620DAD0A9FCA826EC015401AC1C0AA2EAF3AB4A6BCE33B021854AE3CAD5F",
+    "canonicalTreeSha256": "B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8",
+    "excludedPaths": [
+      "bin/qtenv2.bat"
+    ],
+    "consumptionEvidence": "app/argus/repro/evidence/qt-build-consumption-v1.json"
+  },
   "capabilities": {
     "argusWorkerProtocol": 1,
     "noInputConnection": {

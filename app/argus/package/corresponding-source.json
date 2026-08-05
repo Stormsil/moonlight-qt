@@ -1,12 +1,12 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "artifact": "content-addressed Moonlight.exe Argus worker",
-  "artifactSourceCommit": "b20fa0c2e7a0b7517b5b04e3ad06511fa4545df4",
-  "artifactSourceTree": "97b2fec093ec223a49273013cc0f32de7d18ee3c",
-  "buildLogicCommitAuthority": "resolved-by-final-package-receipt",
+  "artifactSourceCommit": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
+  "artifactSourceTree": "743dcb4c876749f786cbbe83857d90a3b0b27754",
+  "buildLogicCommitAuthority": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
-  "sourceBranch": "chore/issue-967-reproducible-worker",
+  "sourceBranch": "fix/issue-969-portable-qt-identity",
   "submodules": [
     "moonlight-common-c/moonlight-common-c@e41355ea01670fd4c830b384009d31dd0339a705",
     "moonlight-common-c/moonlight-common-c/enet@aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
@@ -28,6 +28,14 @@
   },
   "toolchain": {
     "qt": "6.11.1 msvc2022_64",
+    "qtPackageObjectContractSha256": "ECBE37C2E4CEF7B049C145AE6F6B8B66FAE41AAD0C1E8CCDC5EC284AC7662275",
+    "qtPackageObjectReceiptSha256": "BA123F16C09445C65B4A2D06B976D9FB440D978D420F09D6EB836FE5D1C11C48",
+    "qtArchiveSetSha256": "5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02",
+    "qtCanonicalIdentityContractSha256": "0D29620DAD0A9FCA826EC015401AC1C0AA2EAF3AB4A6BCE33B021854AE3CAD5F",
+    "qtCanonicalTreeSha256": "B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8",
+    "qtExcludedPaths": [
+      "bin/qtenv2.bat"
+    ],
     "msvcTools": "14.51.36231",
     "msvcTreeSha256": "D8C03D0942DA022626E335EB1E6FAF1EA018B21DBC10205528BD692706B58CEF",
     "windowsSdk": "10.0.26100.0",
@@ -36,12 +44,12 @@
     "configuration": "Release x64"
   },
   "reproducibleBuild": {
-    "contractPath": "app/argus/repro/reproducible-worker-v1.json",
-    "contractSha256": "C16046B957A8A81791A5CE2F4A275DF51244629C6FEC36D4E933A62CB2198381",
-    "twoBuildProofSha256": "667FA02189ED0C1E65DB2A2BD225C02B51833ACF8403EB7FAF32EF85EB9BE86F",
+    "contractPath": "app/argus/repro/reproducible-worker-v2.json",
+    "contractSha256": "F81F81D7F6E38E9FF46A157EC367F9A457D020F5219B0B9A7B8FAD8652AC4217",
+    "twoBuildProofSha256": "C420354B45CCBB6DD8472478B39971CACDAD12612175BE64B2EE0525C743C67F",
     "buildReceiptSha256": [
-      "EF14A2839797CDF63E21518754236012E8CC6AFAF77F93427BA2D38AD46FEB8C",
-      "04D62D9740B2B9034C3A75F5951E813030254D37529B86A939822080D4EC8590"
+      "FC0627A3D6D2382215DBBE957B83B7BDAA5F87BE3436546589F419CFDD51BDE2",
+      "BAFEF7D2DEAEB84BA648241034CEDB983F88FDE06B6A740154CA8341EF84C873"
     ],
     "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
     "verificationScript": "app/argus/repro/Verify-ReproducibleWorker.ps1",
@@ -57,8 +65,10 @@
     "clone the exact artifact source commit recorded by the final package receipt with core.autocrlf=false",
     "git submodule update --init --recursive",
     "materialize two distinct source roots from the clean authority checkout",
-    "materialize the exact Qt 6.11.1, dependency, MSVC and Windows SDK trees whose SHA256 values are pinned by the reproducible build contract",
-    "run app\\argus\\repro\\Verify-ReproducibleWorker.ps1 with two distinct source and build roots",
+    "verify the exact Qt Updates.xml package relationship and all eight archive objects before extraction",
+    "materialize two build Qt roots and one independent admission Qt root under the versioned canonical identity contract",
+    "materialize the exact dependency, MSVC and Windows SDK trees whose SHA256 values are pinned by the reproducible build contract",
+    "run app\\argus\\repro\\Verify-ReproducibleWorker.ps1 with two distinct source, build and Qt roots",
     "retain the generated two-build proof and both atomic build receipts with the conveyed binary"
   ],
   "expectedOutput": "<build-root>/artifact/Moonlight.exe",
