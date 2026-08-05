@@ -40,7 +40,10 @@ function Write-AtomicJson {
             $temporary,
             "$json`n",
             [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporary -Destination $Path
+        [IO.File]::Move(
+            $temporary,
+            [IO.Path]::GetFullPath($Path),
+            $true)
     }
     finally {
         if (Test-Path -LiteralPath $temporary) {
