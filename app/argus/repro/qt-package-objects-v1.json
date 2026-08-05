@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256-qt-package-object-set-v1",
+  "package": {
+    "name": "qt.qt6.6111.win64_msvc2022_64",
+    "version": "6.11.1-0-202605090529",
+    "releaseDate": "2026-05-09",
+    "sha1": "ED87BB4BAE096573241F34EF4F6AC279DBBC9996"
+  },
+  "archives": [
+    {
+      "metadataName": "qtbase-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 39469569,
+      "sha1": "6F554628540AB947D48294E208CC3CAAE7F023D2",
+      "sha256": "7F97EDC3937FEC7383EB865E010ED5128155BF9C80A563ABCA450860F3E9BEF5"
+    },
+    {
+      "metadataName": "qtsvg-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 689094,
+      "sha1": "353D70F58E5CD55D4217E3EC806A4B5DAD4D320B",
+      "sha256": "1D75CCF1F1A8FC78612C2C78BC2448F8F68949096D38FF9AFE21980E0CB3D9B5"
+    },
+    {
+      "metadataName": "qtdeclarative-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 166957267,
+      "sha1": "7FB3F0F07DDCDB491C39F5DD4E42E0F0F07D2D72",
+      "sha256": "FC716B905581922EE8254740AE0017FCDC90B58138109CE0D9A927C099412F44"
+    },
+    {
+      "metadataName": "qtdoc-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 1858329,
+      "sha1": "848AF4220156C3C861275F8C2BF84428D6665A8B",
+      "sha256": "311977F28A6DF54C923884CE4D2E08BF246BC937D768976AD9F532060E23D286"
+    },
+    {
+      "metadataName": "qttools-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 27133575,
+      "sha1": "F8F33D511BBF38B85AA701425B41455B3512B36D",
+      "sha256": "748F455851E0D81CD0E65232F6110840EDA2BB980C4A4ABF7E58CE97C2FF0F71"
+    },
+    {
+      "metadataName": "qttranslations-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "length": 1946027,
+      "sha1": "0ED00FBD45F905F27AD18F35C0E5410857846209",
+      "sha256": "2DA76E41DE1ED46542B8648E5D92B18F916817FAC1D76121A209D72A0123093C"
+    },
+    {
+      "metadataName": "d3dcompiler_47-x64.7z",
+      "length": 1380117,
+      "sha1": "E37F2611DC8B34BB3765E4866E6940BB3CD4306C",
+      "sha256": "60A197F75DBAC55661BC4697809D8422C2AB6ACEA68A917339BC262E6E46C0C8"
+    },
+    {
+      "metadataName": "opengl32sw-64-mesa_11_2_2-signed_sha256.7z",
+      "length": 5474526,
+      "sha1": "FC005A470FEC64EDF464F517AF8A4B7715F46FD2",
+      "sha256": "DDE9302FBC8535CEDF2FD75FA1826D6AC01E6FDE230C976CD8EC05FE695B9DB3"
+    }
+  ]
+}

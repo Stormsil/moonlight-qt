@@ -7,7 +7,16 @@ param(
     [string] $BuildRootB,
 
     [Parameter(Mandatory = $true)]
-    [string] $QtRoot,
+    [string] $QtRootA,
+
+    [Parameter(Mandatory = $true)]
+    [string] $QtRootB,
+
+    [Parameter(Mandatory = $true)]
+    [string] $QtMaterializationReceiptA,
+
+    [Parameter(Mandatory = $true)]
+    [string] $QtMaterializationReceiptB,
 
     [Parameter(Mandatory = $true)]
     [string] $ToolchainRoot,
@@ -64,14 +73,16 @@ if ($sourceA -ceq $sourceB) {
 }
 
 $buildScript = Join-Path $PSScriptRoot 'Build-ReproducibleWorker.ps1'
-$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRoot `
+$receiptA = & $buildScript -BuildRoot $rootA -QtRoot $QtRootA `
+    -QtMaterializationReceiptPath $QtMaterializationReceiptA `
     -ToolchainRoot $ToolchainRoot -SourceRoot $sourceA `
     -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
-$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRoot `
+$receiptB = & $buildScript -BuildRoot $rootB -QtRoot $QtRootB `
+    -QtMaterializationReceiptPath $QtMaterializationReceiptB `
     -ToolchainRoot $ToolchainRoot -SourceRoot $sourceB `
     -SourceAuthorityRoot $SourceAuthorityRoot | ConvertFrom-Json
 
-if ($receiptA.schemaVersion -ne 1 -or $receiptB.schemaVersion -ne 1) {
+if ($receiptA.schemaVersion -ne 2 -or $receiptB.schemaVersion -ne 2) {
     throw 'A build returned an unsupported atomic receipt.'
 }
 
@@ -91,7 +102,12 @@ if ((Get-FileHash -Algorithm SHA256 -LiteralPath $workerA).Hash -cne
 if ($receiptA.contractSha256 -cne $receiptB.contractSha256 -or
     $receiptA.source.forkCommit -cne $receiptB.source.forkCommit -or
     $receiptA.source.sourceTree -cne $receiptB.source.sourceTree -or
-    $receiptA.inputs.qtTreeSha256 -cne $receiptB.inputs.qtTreeSha256 -or
+    $receiptA.inputs.qt.identity.contractSha256 -cne
+        $receiptB.inputs.qt.identity.contractSha256 -or
+    $receiptA.inputs.qt.identity.canonicalTreeSha256 -cne
+        $receiptB.inputs.qt.identity.canonicalTreeSha256 -or
+    $receiptA.inputs.qt.packageObjects.archiveSetSha256 -cne
+        $receiptB.inputs.qt.packageObjects.archiveSetSha256 -or
     $receiptA.inputs.dependencyTreeSha256 -cne
         $receiptB.inputs.dependencyTreeSha256 -or
     $receiptA.inputs.msvcTreeSha256 -cne
@@ -128,7 +144,7 @@ $receiptBytesA = [IO.File]::ReadAllBytes($receiptPathA)
 $receiptBytesB = [IO.File]::ReadAllBytes($receiptPathB)
 
 $proof = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     sourceCommit = $receiptA.source.forkCommit
     sourceTree = $receiptA.source.sourceTree
     contractSha256 = $receiptA.contractSha256

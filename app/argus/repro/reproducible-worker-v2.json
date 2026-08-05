@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "configuration": "release",
   "architecture": "x64",
   "source": {
@@ -13,8 +13,20 @@
   "qt": {
     "version": "6.11.1",
     "target": "msvc2022_64",
-    "treeSha256": "815FFFB3BF1F43FCE227E74CAD61C0B13DA37540811DC5B7ECAAEE534C524A9D",
-    "qmakeSha256": "B208F3AEAECE4731772743D54C8CFEC81C74E5AC8AB4A26D7E058E4628B15EF2"
+    "qmakeSha256": "B208F3AEAECE4731772743D54C8CFEC81C74E5AC8AB4A26D7E058E4628B15EF2",
+    "packageObjects": {
+      "contractSha256": "ECBE37C2E4CEF7B049C145AE6F6B8B66FAE41AAD0C1E8CCDC5EC284AC7662275",
+      "archiveSetSha256": "5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02"
+    },
+    "identity": {
+      "schemaVersion": 1,
+      "algorithm": "sha256-relative-path-nul-content-sha256-lf-v1",
+      "contractSha256": "0D29620DAD0A9FCA826EC015401AC1C0AA2EAF3AB4A6BCE33B021854AE3CAD5F",
+      "canonicalTreeSha256": "B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8",
+      "excludedPaths": [
+        "bin/qtenv2.bat"
+      ]
+    }
   },
   "dependencies": {
     "repository": "https://github.com/moonlight-stream/moonlight-qt-deps",

@@ -7,6 +7,9 @@ param(
     [string] $QtRoot,
 
     [Parameter(Mandatory = $true)]
+    [string] $QtMaterializationReceiptPath,
+
+    [Parameter(Mandatory = $true)]
     [string] $ToolchainRoot,
 
     [string] $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
@@ -123,9 +126,9 @@ if (Test-Path -LiteralPath $build) {
     throw 'BuildRoot must not exist; reproducible builds always start clean.'
 }
 
-$contractPath = Join-Path $source 'app\argus\repro\reproducible-worker-v1.json'
+$contractPath = Join-Path $source 'app\argus\repro\reproducible-worker-v2.json'
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
-if ($contract.schemaVersion -ne 1 -or
+if ($contract.schemaVersion -ne 2 -or
     $contract.configuration -cne 'release' -or
     $contract.architecture -cne 'x64') {
     throw 'The reproducible worker contract is unsupported.'
@@ -184,9 +187,39 @@ $qtVersion = (& $qmake -query QT_VERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $qtVersion -cne $contract.qt.version) {
     throw 'The Qt version drifted.'
 }
-$qtTreeSha256 = Get-TreeSha256 $qt
-if ($qtTreeSha256 -cne $contract.qt.treeSha256) {
-    throw 'The Qt input tree drifted.'
+$qtIdentityContractPath = Join-Path $source `
+    'app\argus\repro\qt-canonical-identity-v1.json'
+$qtPackageObjectContractPath = Join-Path $source `
+    'app\argus\repro\qt-package-objects-v1.json'
+Assert-Hash $qtPackageObjectContractPath `
+    $contract.qt.packageObjects.contractSha256 `
+    'Qt package object contract'
+$qtIdentity = & (Join-Path $source `
+        'app\argus\repro\Get-QtCanonicalIdentity.ps1') `
+    -QtRoot $qt -ContractPath $qtIdentityContractPath | ConvertFrom-Json
+$qtMaterializationReceipt = Get-Content -Raw -LiteralPath `
+    (Resolve-Path -LiteralPath $QtMaterializationReceiptPath).Path |
+    ConvertFrom-Json
+if ($qtMaterializationReceipt.schemaVersion -ne 1 -or
+    $qtMaterializationReceipt.archiveSetSha256 -cne
+        $contract.qt.packageObjects.archiveSetSha256 -or
+    $qtIdentity.schemaVersion -ne $contract.qt.identity.schemaVersion -or
+    $qtIdentity.algorithm -cne $contract.qt.identity.algorithm -or
+    $qtIdentity.contractSha256 -cne $contract.qt.identity.contractSha256 -or
+    $qtIdentity.canonicalTreeSha256 -cne
+        $contract.qt.identity.canonicalTreeSha256 -or
+    $contract.qt.identity.excludedPaths.Count -ne 1 -or
+    $contract.qt.identity.excludedPaths[0] -cne 'bin/qtenv2.bat' -or
+    $qtMaterializationReceipt.qtIdentity.contractSha256 -cne
+        $qtIdentity.contractSha256 -or
+    $qtMaterializationReceipt.qtIdentity.canonicalTreeSha256 -cne
+        $qtIdentity.canonicalTreeSha256 -or
+    $qtMaterializationReceipt.qtIdentity.includedFileCount -ne
+        $qtIdentity.includedFileCount -or
+    $qtMaterializationReceipt.qtIdentity.excludedPaths.Count -ne 1 -or
+    $qtMaterializationReceipt.qtIdentity.excludedPaths[0] -cne
+        'bin/qtenv2.bat') {
+    throw 'The Qt materialization does not match the canonical identity contract.'
 }
 
 $dependencies = Join-Path $source 'libs\windows'
@@ -301,7 +334,7 @@ foreach ($forbiddenPath in @(
 }
 
 $receipt = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     contractSha256 = Get-Sha256 $contractPath
     source = [ordered]@{
         forkCommit = @(Invoke-Git $sourceAuthority @(
@@ -318,8 +351,23 @@ $receipt = [ordered]@{
         commonCResultTreeSha256 = $contract.source.commonCResultTreeSha256
     }
     inputs = [ordered]@{
-        qtVersion = $qtVersion
-        qtTreeSha256 = $qtTreeSha256
+        qt = [ordered]@{
+            version = $qtVersion
+            target = $contract.qt.target
+            packageObjects = [ordered]@{
+                contractSha256 = $contract.qt.packageObjects.contractSha256
+                archiveSetSha256 = $qtMaterializationReceipt.archiveSetSha256
+                receiptSha256 = $qtMaterializationReceipt.packageObjectReceiptSha256
+            }
+            identity = [ordered]@{
+                schemaVersion = $qtIdentity.schemaVersion
+                algorithm = $qtIdentity.algorithm
+                contractSha256 = $qtIdentity.contractSha256
+                canonicalTreeSha256 = $qtIdentity.canonicalTreeSha256
+                excludedPaths = @($qtIdentity.excludedPaths)
+                includedFileCount = $qtIdentity.includedFileCount
+            }
+        }
         dependencyReleaseTag = $contract.dependencies.releaseTag
         dependencyTreeSha256 = $dependencyTreeSha256
         msvcTreeSha256 = $contract.msvc.treeSha256

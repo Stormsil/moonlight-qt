@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256-relative-path-nul-content-sha256-lf-v1",
+  "pathComparison": "ordinal",
+  "excludedPaths": [
+    {
+      "path": "bin/qtenv2.bat",
+      "classification": "qt-generated-environment-launcher",
+      "buildConsumption": "proven-unused-release-x64",
+      "evidence": "call-graph-and-file-io-v1"
+    }
+  ]
+}
