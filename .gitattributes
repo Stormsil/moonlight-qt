@@ -1,1 +1,2 @@
 app/argus/common-c/*.patch text eol=lf
+app/argus/package/*.json text eol=lf

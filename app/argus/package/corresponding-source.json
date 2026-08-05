@@ -1,10 +1,12 @@
 {
-  "schemaVersion": 2,
-  "artifact": "Moonlight.exe Argus worker checkpoint",
-  "forkCommitAuthority": "resolved-by-final-package-receipt",
+  "schemaVersion": 3,
+  "artifact": "content-addressed Moonlight.exe Argus worker",
+  "artifactSourceCommit": "b549c9e920976a41af34a3dd023798d9428e5948",
+  "artifactSourceTree": "8ec81027a069dbb9b4142e5b9e8487ec45b625e0",
+  "buildLogicCommitAuthority": "resolved-by-final-package-receipt",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
-  "sourceBranch": "argus/headless-worker-v1",
+  "sourceBranch": "chore/issue-967-reproducible-worker",
   "submodules": [
     "moonlight-common-c/moonlight-common-c@e41355ea01670fd4c830b384009d31dd0339a705",
     "moonlight-common-c/moonlight-common-c/enet@aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
@@ -29,14 +31,26 @@
     "visualStudio": "18.8",
     "configuration": "Release x64"
   },
+  "reproducibleBuild": {
+    "contractPath": "app/argus/repro/reproducible-worker-v1.json",
+    "contractSha256": "FCF1517AC514919315358AE90428D7DBCEF814FBD529C9DEC285E021B1289E2F",
+    "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
+    "verificationScript": "app/argus/repro/Verify-ReproducibleWorker.ps1",
+    "workerSha256": "C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385",
+    "cleanBuildCount": 2,
+    "absoluteRootsDistinct": true,
+    "byteForByteIdentical": true,
+    "pdbCanonicalArtifact": false,
+    "pdbDistributed": false
+  },
   "buildSteps": [
-    "clone the exact fork commit recorded by the final package receipt",
+    "clone the exact artifact source commit recorded by the final package receipt with core.autocrlf=false",
     "git submodule update --init --recursive",
-    "run app\\argus\\common-c\\Materialize-CommonC.ps1 against the pristine exact moonlight-common-c checkout and a new task-owned destination",
-    "provide task-local Qt 6.11.1 msvc2022_64 and 7-Zip on process-local PATH",
-    "run qmake for Release x64 with ARGUS_COMMON_C_DIR set to the validated materialized destination, then nmake and the normal deploy steps"
+    "materialize the exact Qt 6.11.1 and official dependency trees whose SHA256 values are pinned by the reproducible build contract",
+    "run app\\argus\\repro\\Verify-ReproducibleWorker.ps1 with two distinct nonexistent task-owned build roots",
+    "retain the generated two-build proof and both atomic build receipts with the conveyed binary"
   ],
-  "expectedOutput": "build/deploy-x64-release/Moonlight.exe",
+  "expectedOutput": "<build-root>/artifact/Moonlight.exe",
   "sourceOfferPrepared": false,
   "completeMaterializedSourceRequiredForDistribution": true,
   "distributionAllowed": false,
