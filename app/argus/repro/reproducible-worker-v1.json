@@ -49,7 +49,7 @@
     "sourceDateEpoch": "1785528916",
     "timezone": "UTC",
     "visualStudioLanguage": "1033",
-    "compilerFlags": "/GL /ZH:SHA_256",
+    "compilerFlags": "/GL /ZH:SHA_256 /experimental:deterministic",
     "linkerFlags": "/LTCG /Brepro",
     "sourceDateEpochHonoredByMsvc": false
   },
