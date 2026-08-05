@@ -46,10 +46,10 @@
   "reproducibleBuild": {
     "contractPath": "app/argus/repro/reproducible-worker-v2.json",
     "contractSha256": "F81F81D7F6E38E9FF46A157EC367F9A457D020F5219B0B9A7B8FAD8652AC4217",
-    "twoBuildProofSha256": "C420354B45CCBB6DD8472478B39971CACDAD12612175BE64B2EE0525C743C67F",
+    "twoBuildProofSha256": "1E19EEEFF89ADAA7EEB276065CCFB0A8CDC5523F8DEEC14D1AB122F878025E0A",
     "buildReceiptSha256": [
-      "FC0627A3D6D2382215DBBE957B83B7BDAA5F87BE3436546589F419CFDD51BDE2",
-      "BAFEF7D2DEAEB84BA648241034CEDB983F88FDE06B6A740154CA8341EF84C873"
+      "1F08586FFC2CEFF0ADF19892BE625C9E5465381F4EDB55DE489468535962A20A",
+      "9CED5E160B6D493DDE541D0ED94F9094DD54FF138AF42F94B9D1C53290217EBF"
     ],
     "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
     "verificationScript": "app/argus/repro/Verify-ReproducibleWorker.ps1",
@@ -59,7 +59,12 @@
     "absoluteSourceRootsDistinct": true,
     "byteForByteIdentical": true,
     "pdbCanonicalArtifact": false,
-    "pdbDistributed": false
+    "pdbDistributed": false,
+    "qtRootIdentitySha256": [
+      "67A6EF37C5A51678F4A35AD87653C8DADC631A3FB806054C012E9BF709393FFE",
+      "09627255A9162F05FEC2EC46E583DBEFECFC95FB772D286B1F21D42BC0B7C8DD"
+    ],
+    "rootIdentityRefreshScript": "app/argus/repro/Refresh-QtRootIdentityEvidence.ps1"
   },
   "buildSteps": [
     "clone the exact artifact source commit recorded by the final package receipt with core.autocrlf=false",

@@ -157,6 +157,34 @@ $proof.buildReceipts = @($atomicReceiptPaths | ForEach-Object {
     })
 Write-AtomicJson $proof $ProofPath
 
+$sourceInventoryPath = Join-Path $PSScriptRoot `
+    '..\package\source-inventory.json'
+$correspondingSourcePath = Join-Path $PSScriptRoot `
+    '..\package\corresponding-source.json'
+$sourceInventory = Get-Content -Raw -LiteralPath $sourceInventoryPath |
+    ConvertFrom-Json
+$correspondingSource = Get-Content -Raw -LiteralPath `
+    $correspondingSourcePath | ConvertFrom-Json
+if ($sourceInventory.schemaVersion -ne 4 -or
+    $correspondingSource.schemaVersion -ne 5) {
+    throw 'The corresponding-source receipts are not the admitted schemas.'
+}
+Set-JsonProperty $sourceInventory.qtInput 'rootIdentityAlgorithm' `
+    'sha256-uppercase-normalized-absolute-path-utf8-v1'
+Set-JsonProperty $correspondingSource.reproducibleBuild `
+    'qtRootIdentitySha256' @($rootIdentities[0], $rootIdentities[1])
+Set-JsonProperty $correspondingSource.reproducibleBuild `
+    'rootIdentityRefreshScript' `
+    'app/argus/repro/Refresh-QtRootIdentityEvidence.ps1'
+$correspondingSource.reproducibleBuild.twoBuildProofSha256 =
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $ProofPath).Hash
+$correspondingSource.reproducibleBuild.buildReceiptSha256 = @(
+    $atomicReceiptPaths | ForEach-Object {
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash
+    })
+Write-AtomicJson $sourceInventory $sourceInventoryPath
+Write-AtomicJson $correspondingSource $correspondingSourcePath
+
 Write-AtomicJson $materializations[2] $AdmissionEvidencePath
 $consumption = Get-Content -Raw -LiteralPath `
     (Resolve-Path -LiteralPath $ConsumptionEvidencePath).Path |

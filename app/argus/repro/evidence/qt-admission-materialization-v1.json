@@ -11,5 +11,6 @@
       "bin/qtenv2.bat"
     ],
     "includedFileCount": 10880
-  }
+  },
+  "qtRootIdentitySha256": "0DAF48B1A77A5E7DD14810394E191CE537E8A43F405B17B0A2AF4F2D2DA4DF4F"
 }

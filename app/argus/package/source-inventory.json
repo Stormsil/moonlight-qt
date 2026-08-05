@@ -20,7 +20,8 @@
     "excludedPaths": [
       "bin/qtenv2.bat"
     ],
-    "consumptionEvidence": "app/argus/repro/evidence/qt-build-consumption-v1.json"
+    "consumptionEvidence": "app/argus/repro/evidence/qt-build-consumption-v1.json",
+    "rootIdentityAlgorithm": "sha256-uppercase-normalized-absolute-path-utf8-v1"
   },
   "capabilities": {
     "argusWorkerProtocol": 1,
