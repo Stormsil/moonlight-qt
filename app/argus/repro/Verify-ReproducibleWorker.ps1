@@ -117,13 +117,21 @@ $pdbContainsTaskLocalPaths =
     $pdbTextB.Contains($rootB, [StringComparison]::OrdinalIgnoreCase)
 $pdbContentIdentical = $receiptA.artifact.pdbSha256 -ceq
     $receiptB.artifact.pdbSha256
+$receiptPathA = Join-Path $rootA `
+    'artifact\reproducible-worker-receipt.json'
+$receiptPathB = Join-Path $rootB `
+    'artifact\reproducible-worker-receipt.json'
+$receiptBytesA = [IO.File]::ReadAllBytes($receiptPathA)
+$receiptBytesB = [IO.File]::ReadAllBytes($receiptPathB)
 
 $proof = [ordered]@{
     schemaVersion = 1
     sourceCommit = $receiptA.source.forkCommit
     sourceTree = $receiptA.source.sourceTree
     contractSha256 = $receiptA.contractSha256
+    cleanBuildCount = 2
     absoluteRootsDistinct = $true
+    absoluteSourceRootsDistinct = $true
     buildRootIdentitySha256 = @(
         $receiptA.buildRootIdentitySha256,
         $receiptB.buildRootIdentitySha256)
@@ -154,16 +162,14 @@ $proof = [ordered]@{
     environment = $receiptA.environment
     buildReceipts = @(
         [ordered]@{
-            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
-                    Join-Path $rootA `
-                        'artifact\reproducible-worker-receipt.json')).Hash
-            receipt = $receiptA
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+                    $receiptPathA).Hash
+            utf8Base64 = [Convert]::ToBase64String($receiptBytesA)
         },
         [ordered]@{
-            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
-                    Join-Path $rootB `
-                        'artifact\reproducible-worker-receipt.json')).Hash
-            receipt = $receiptB
+            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+                    $receiptPathB).Hash
+            utf8Base64 = [Convert]::ToBase64String($receiptBytesB)
         })
 }
 Write-AtomicJson $proof $ProofPath
