@@ -68,11 +68,12 @@ app\argus\repro\Verify-ReproducibleWorker.ps1 `
 The two source and Qt roots are independent materializations, not extra Git
 owners. Each build receipt hashes its source-, build-, and Qt-root identities,
 complete materialized source tree, task-local toolchain trees, and artifact.
-The proof rejects any matching pair and embeds both atomic build receipts and
-their content hashes. `Refresh-QtRootIdentityEvidence.ps1` exists only to add
-this path-separation evidence to already-valid #969 atomic receipts without
-rerunning unchanged builds; it revalidates the exact worker, canonical Qt and
-package-object identities before rewriting the proof atomically.
+The proof rejects any matching pair and embeds both original atomic build
+receipts and their content hashes. `Refresh-QtRootIdentityEvidence.ps1` adds a
+separate versioned post-consumption path-separation attestation without
+rewriting those build-time receipts or rerunning unchanged builds. It actually
+recomputes canonical identity for all three preserved Qt roots and regenerates
+the exact eight-object package receipt before rewriting the proof atomically.
 
 The MSVC PDB is retained as task-local diagnostic evidence only. MSVC records
 task-local build paths in the PDB even with deterministic compiler path mapping,

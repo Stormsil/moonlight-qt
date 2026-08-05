@@ -10,7 +10,13 @@ param(
     [Parameter(Mandatory = $true)] [string] $AdmissionMaterializationReceipt,
     [Parameter(Mandatory = $true)] [string] $ProofPath,
     [Parameter(Mandatory = $true)] [string] $AdmissionEvidencePath,
-    [Parameter(Mandatory = $true)] [string] $ConsumptionEvidencePath
+    [Parameter(Mandatory = $true)] [string] $ConsumptionEvidencePath,
+    [Parameter(Mandatory = $true)] [string] $UpdatesXmlPath,
+    [Parameter(Mandatory = $true)] [string] $ArchiveDirectory,
+    [Parameter(Mandatory = $true)] [string] $PackageObjectContractPath,
+    [Parameter(Mandatory = $true)] [string] $PackageObjectReceiptPath,
+    [Parameter(Mandatory = $true)] [string] $IdentityContractPath,
+    [Parameter(Mandatory = $true)] [string] $BotRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,6 +91,43 @@ if (($rootIdentities | Select-Object -Unique).Count -ne 3) {
     throw 'Build and admission Qt root identities must be distinct.'
 }
 
+$temporaryObjectReceipt = Join-Path ([IO.Path]::GetTempPath()) `
+    "argus-qt-post-consumption-$([Guid]::NewGuid().ToString('N')).json"
+try {
+    & (Join-Path $PSScriptRoot 'Write-QtPackageObjectReceipt.ps1') `
+        -UpdatesXmlPath $UpdatesXmlPath `
+        -ArchiveDirectory $ArchiveDirectory `
+        -ContractPath $PackageObjectContractPath `
+        -OutputPath $temporaryObjectReceipt
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath `
+            $temporaryObjectReceipt).Hash -cne $packageReceiptSha256 -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath `
+            $PackageObjectReceiptPath).Hash -cne $packageReceiptSha256) {
+        throw 'The exact eight-object Qt package receipt did not revalidate.'
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryObjectReceipt) {
+        Remove-Item -LiteralPath $temporaryObjectReceipt -Force
+    }
+}
+
+$identityTool = Join-Path $PSScriptRoot 'Get-QtCanonicalIdentity.ps1'
+$actualIdentities = @($qtRoots | ForEach-Object {
+        & $identityTool -QtRoot $_ -ContractPath $IdentityContractPath |
+            ConvertFrom-Json
+    })
+foreach ($identity in $actualIdentities) {
+    if ($identity.schemaVersion -ne 1 -or
+        $identity.algorithm -cne
+            'sha256-relative-path-nul-content-sha256-lf-v1' -or
+        $identity.canonicalTreeSha256 -cne $canonicalQtSha256 -or
+        $identity.excludedPaths.Count -ne 1 -or
+        $identity.excludedPaths[0] -cne 'bin/qtenv2.bat') {
+        throw 'A preserved Qt root failed post-consumption revalidation.'
+    }
+}
+
 $materializationPaths = @(
     $QtMaterializationReceiptA,
     $QtMaterializationReceiptB,
@@ -97,10 +140,12 @@ for ($index = 0; $index -lt 3; $index++) {
     if ($receipt.schemaVersion -ne 1 -or
         $receipt.packageObjectReceiptSha256 -cne $packageReceiptSha256 -or
         $receipt.archiveSetSha256 -cne $archiveSetSha256 -or
-        $receipt.qtIdentity.schemaVersion -ne 1 -or
+        $receipt.qtIdentity.schemaVersion -ne
+            $actualIdentities[$index].schemaVersion -or
         $receipt.qtIdentity.algorithm -cne
-            'sha256-relative-path-nul-content-sha256-lf-v1' -or
-        $receipt.qtIdentity.canonicalTreeSha256 -cne $canonicalQtSha256 -or
+            $actualIdentities[$index].algorithm -or
+        $receipt.qtIdentity.canonicalTreeSha256 -cne
+            $actualIdentities[$index].canonicalTreeSha256 -or
         $receipt.qtIdentity.excludedPaths.Count -ne 1 -or
         $receipt.qtIdentity.excludedPaths[0] -cne 'bin/qtenv2.bat') {
         throw 'A Qt materialization receipt is not the admitted exact input.'
@@ -117,9 +162,29 @@ $buildRoots = @(
 $atomicReceiptPaths = @($buildRoots | ForEach-Object {
         Join-Path $_ 'artifact\reproducible-worker-receipt.json'
     })
-$atomicReceipts = @()
+$originalProofLines = & git -C (Resolve-Path -LiteralPath $BotRoot).Path `
+    show `
+    'd8e4f97d:tools/Argus.StreamWorker.Harness/evidence/package-v1/reproducible-worker-proof.json' `
+    2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "Git could not read the original atomic proof: $($originalProofLines -join [Environment]::NewLine)"
+}
+$originalProof = ($originalProofLines -join "`n") | ConvertFrom-Json
+if ($originalProof.schemaVersion -ne 2 -or
+    $originalProof.worker.sha256 -cne $workerSha256 -or
+    $originalProof.buildReceipts.Count -ne 2) {
+    throw 'The preserved original atomic proof is invalid.'
+}
 for ($index = 0; $index -lt 2; $index++) {
-    $atomic = Get-Content -Raw -LiteralPath $atomicReceiptPaths[$index] |
+    $originalBytes = [Convert]::FromBase64String(
+        $originalProof.buildReceipts[$index].utf8Base64)
+    if ([Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($originalBytes)) -cne
+        $originalProof.buildReceipts[$index].sha256) {
+        throw 'An original atomic build receipt hash is invalid.'
+    }
+    [IO.File]::WriteAllBytes($atomicReceiptPaths[$index], $originalBytes)
+    $atomic = [Text.Encoding]::UTF8.GetString($originalBytes) |
         ConvertFrom-Json
     $worker = Join-Path $buildRoots[$index] 'artifact\Moonlight.exe'
     if ($atomic.schemaVersion -ne 2 -or
@@ -132,10 +197,6 @@ for ($index = 0; $index -lt 2; $index++) {
             $packageReceiptSha256) {
         throw 'An atomic build receipt is not bound to the admitted worker.'
     }
-    Set-JsonProperty $atomic 'qtRootIdentitySha256' `
-        $rootIdentities[$index]
-    Write-AtomicJson $atomic $atomicReceiptPaths[$index]
-    $atomicReceipts += $atomic
 }
 
 $proof = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $ProofPath) |
@@ -149,12 +210,16 @@ Set-JsonProperty $proof 'absoluteQtRootsDistinct' $true
 Set-JsonProperty $proof 'qtRootIdentitySha256' @(
     $rootIdentities[0],
     $rootIdentities[1])
-$proof.buildReceipts = @($atomicReceiptPaths | ForEach-Object {
-        $bytes = [IO.File]::ReadAllBytes($_)
-        [ordered]@{
-            sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash
-            utf8Base64 = [Convert]::ToBase64String($bytes)
-        }
+$proof.buildReceipts = @($originalProof.buildReceipts)
+Set-JsonProperty $proof 'qtRootIdentityAttestation' ([ordered]@{
+        schemaVersion = 1
+        timing = 'post-consumption-existing-artifact'
+        algorithm = 'sha256-uppercase-normalized-absolute-path-utf8-v1'
+        qtRootIdentitySha256 = $rootIdentities
+        canonicalIdentityRevalidated = $true
+        packageObjectsRevalidated = $true
+        packageObjectReceiptSha256 = $packageReceiptSha256
+        canonicalTreeSha256 = $canonicalQtSha256
     })
 Write-AtomicJson $proof $ProofPath
 
