@@ -3,6 +3,12 @@ QT       -= core gui
 TARGET = AntiHooking
 TEMPLATE = lib
 
+win32:*-msvc:CONFIG(release, debug|release) {
+    # Keep the CodeView path independent of the task-local build root so the
+    # separately deployed DLL is reproducible alongside Moonlight.exe.
+    QMAKE_LFLAGS += /PDBALTPATH:AntiHooking.pdb
+}
+
 include(../globaldefs.pri)
 
 INCLUDEPATH += $$PWD/../libs/windows/include

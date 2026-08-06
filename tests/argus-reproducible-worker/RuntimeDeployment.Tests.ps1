@@ -1,0 +1,70 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+function Assert-Equal([object] $Expected, [object] $Actual, [string] $Message) {
+    if ($Expected -cne $Actual) {
+        throw "$Message Expected '$Expected', got '$Actual'."
+    }
+}
+
+$sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$contractPath = Join-Path $sourceRoot `
+    'app\argus\repro\runtime-deployment-v1.json'
+$contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
+
+Assert-Equal 1 $contract.schemaVersion 'Runtime schema drifted.'
+Assert-Equal 6 $contract.manifestSchemaVersion `
+    'Runtime manifest schema drifted.'
+Assert-Equal '014dc6fff6ed7790c6ff411cec05cbd709d3bad9' `
+    $contract.requiredAncestor 'Producer ancestry drifted.'
+Assert-Equal 'C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385' `
+    $contract.worker.sha256 'Worker identity drifted.'
+Assert-Equal 2832384 $contract.worker.length 'Worker length drifted.'
+Assert-Equal 'B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8' `
+    $contract.qt.treeSha256 'Qt identity drifted.'
+Assert-Equal '195EFB527A1E3B66EC3A36DFA6D4057FC86384873F957B0A04C72854F1BE8E2E' `
+    $contract.dependencies.treeSha256 'Dependency identity drifted.'
+Assert-Equal '3BE53DEB7B9AB371372FF676C31655CF552CE4040F90423E8293E0E067A619E6' `
+    $contract.qt.windeployqtSha256 'windeployqt identity drifted.'
+Assert-Equal 'D0ED426B928FCF322254017822EDD74EDAB6014772CA5098F2583782AC8D965D' `
+    $contract.peImportTool.sha256 'PE import tool identity drifted.'
+
+$expectedArguments = @(
+    '--dir={runtimeRoot}', '--release', '--qmldir={sourceRoot}/app/gui',
+    '--no-opengl-sw', '--no-compiler-runtime', '--no-sql',
+    '--no-system-d3d-compiler', '--no-system-dxc-compiler',
+    '--skip-plugin-types=qmltooling,generic', '--no-ffmpeg',
+    '--no-quickcontrols2fusion', '--no-quickcontrols2imagine',
+    '--no-quickcontrols2universal', '--no-quickcontrols2fusionstyleimpl',
+    '--no-quickcontrols2imaginestyleimpl',
+    '--no-quickcontrols2universalstyleimpl',
+    '--no-quickcontrols2windowsstyleimpl',
+    '--no-quickcontrols2fluentwinui3styleimpl')
+Assert-Equal ($expectedArguments -join "`n") `
+    (@($contract.qt.arguments) -join "`n") `
+    'windeployqt invocation drifted.'
+
+foreach ($required in @(
+        'AntiHooking.dll', 'gamecontrollerdb.txt',
+        'platforms/qwindows.dll', 'tls/qcertonlybackend.dll',
+        'tls/qschannelbackend.dll')) {
+    if (@($contract.qt.requiredRuntimePaths) -cnotcontains $required) {
+        throw "Required runtime path '$required' is unbound."
+    }
+}
+if ($contract.ambientPathAllowed -ne $false -or
+    $contract.distributionAllowed -ne $false -or
+    $contract.legalApproval -ne $false) {
+    throw 'Runtime safety/legal gates must remain false.'
+}
+
+$antiHookProject = Get-Content -Raw -LiteralPath (
+    Join-Path $sourceRoot 'AntiHooking\AntiHooking.pro')
+if ($antiHookProject -cnotmatch '/PDBALTPATH:AntiHooking\.pdb') {
+    throw 'AntiHooking.dll still embeds a task-local PDB path.'
+}
+
+Write-Output 'Runtime deployment contract tests passed.'
