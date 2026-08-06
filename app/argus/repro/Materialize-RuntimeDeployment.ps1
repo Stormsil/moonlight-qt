@@ -33,10 +33,7 @@ function Assert-ExactProperties(
     [Array]::Sort($actual, [StringComparer]::Ordinal)
     $orderedExpected = @($Expected)
     [Array]::Sort($orderedExpected, [StringComparer]::Ordinal)
-    if (-not [Linq.Enumerable]::SequenceEqual[string](
-            $actual,
-            $orderedExpected,
-            [StringComparer]::Ordinal)) {
+    if (($actual -join "`n") -cne ($orderedExpected -join "`n")) {
         throw "$Name properties are unsupported."
     }
 }
