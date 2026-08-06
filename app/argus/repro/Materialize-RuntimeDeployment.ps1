@@ -205,7 +205,7 @@ $buildReceiptPath = Join-Path $build 'artifact\reproducible-worker-receipt.json'
 $buildReceipt = Get-Content -Raw -LiteralPath $buildReceiptPath | ConvertFrom-Json
 $proof = Get-Content -Raw -LiteralPath $proofPath | ConvertFrom-Json
 $workerSource = Join-Path $build 'artifact\Moonlight.exe'
-$antiHookSource = Join-Path $build 'obj\AntiHooking\release\AntiHooking.dll'
+$antiHookSource = Join-Path $build 'artifact\AntiHooking.dll'
 $gameControllerSource = Join-Path $source `
     'app\SDL_GameControllerDB\gamecontrollerdb.txt'
 if ($buildReceipt.schemaVersion -ne 2 -or $proof.schemaVersion -ne 2 -or
@@ -332,7 +332,7 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
     }
     elseif ($relative -ceq 'AntiHooking.dll') {
         $component = 'worker-build-output'
-        $sourceRelative = 'obj/AntiHooking/release/AntiHooking.dll'
+        $sourceRelative = 'artifact/AntiHooking.dll'
     }
     elseif ($relative -ceq 'gamecontrollerdb.txt') {
         $component = 'moonlight-source'

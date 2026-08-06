@@ -61,10 +61,11 @@ if ($contract.ambientPathAllowed -ne $false -or
     throw 'Runtime safety/legal gates must remain false.'
 }
 
-$antiHookProject = Get-Content -Raw -LiteralPath (
-    Join-Path $sourceRoot 'AntiHooking\AntiHooking.pro')
-if ($antiHookProject -cnotmatch '/PDBALTPATH:AntiHooking\.pdb') {
-    throw 'AntiHooking.dll still embeds a task-local PDB path.'
+$buildScript = Get-Content -Raw -LiteralPath (
+    Join-Path $sourceRoot 'app\argus\repro\Build-ReproducibleWorker.ps1')
+if ($buildScript -cnotmatch 'LDFLAGS=.*PDBALTPATH:AntiHooking\.pdb' -or
+    $buildScript -cnotmatch '\$antiHook = Join-Path \$artifactRoot') {
+    throw 'The independent reproducible AntiHooking.dll build is missing.'
 }
 
 Write-Output 'Runtime deployment contract tests passed.'

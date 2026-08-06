@@ -301,6 +301,43 @@ if ($LASTEXITCODE -ne 0) {
     throw "The pinned Release x64 build failed with exit $LASTEXITCODE."
 }
 
+# Build the separately deployed DLL only after Moonlight.exe has linked
+# against the upstream import library. This preserves the admitted worker
+# bytes while giving the runtime DLL its own root-independent CodeView path.
+$antiHookRoot = Join-Path $build 'anti-hooking'
+New-Item -ItemType Directory -Path $antiHookRoot | Out-Null
+$antiHookCommandPath = Join-Path $build 'build-antihooking.cmd'
+$antiHookCommandLines = @(
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "CL="',
+    'set "_CL_="',
+    'set "LINK="',
+    'set "_LINK_="',
+    "set `"PATH=$(Join-Path $qt 'bin');$vcBin;$sdkBin;%SystemRoot%\System32;%SystemRoot%`"",
+    "set `"INCLUDE=$(Join-Path $msvc 'include');$(Join-Path $windowsSdk 'Include\ucrt');$(Join-Path $windowsSdk 'Include\shared');$(Join-Path $windowsSdk 'Include\um');$(Join-Path $windowsSdk 'Include\winrt');$(Join-Path $windowsSdk 'Include\cppwinrt')`"",
+    "set `"LIB=$(Join-Path $msvc 'lib\x64');$(Join-Path $windowsSdk 'Lib\ucrt\x64');$(Join-Path $windowsSdk 'Lib\um\x64')`"",
+    "set `"TEMP=$tempRoot`"",
+    "set `"TMP=$tempRoot`"",
+    "set `"TZ=$($contract.environment.timezone)`"",
+    "set `"VSLANG=$($contract.environment.visualStudioLanguage)`"",
+    "set `"SOURCE_DATE_EPOCH=$($contract.environment.sourceDateEpoch)`"",
+    "set `"CFLAGS=$compilerFlags`"",
+    "set `"CXXFLAGS=$compilerFlags`"",
+    "set `"LDFLAGS=$linkerFlags /PDBALTPATH:AntiHooking.pdb`"",
+    "cd /d `"$antiHookRoot`" || exit /b 1",
+    "`"$qmake`" -o Makefile `"$(Join-Path $source 'AntiHooking\AntiHooking.pro')`" || exit /b 1",
+    "`"$jom`" -f Makefile release || exit /b 1")
+[IO.File]::WriteAllLines(
+    $antiHookCommandPath,
+    $antiHookCommandLines,
+    [Text.ASCIIEncoding]::new())
+$antiHookBuildOutput = & cmd.exe /d /c $antiHookCommandPath 2>&1
+$antiHookBuildOutput | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw "The pinned AntiHooking Release build failed with exit $LASTEXITCODE."
+}
+
 $postBuildQtIdentity = & (Join-Path $source `
         'app\argus\repro\Get-QtCanonicalIdentity.ps1') `
     -QtRoot $qt -ContractPath $qtIdentityContractPath | ConvertFrom-Json
@@ -320,8 +357,11 @@ $workerSource = Join-Path $objectRoot 'app\release\Moonlight.exe'
 $pdbSource = Join-Path $objectRoot 'app\release\Moonlight.pdb'
 $worker = Join-Path $artifactRoot $contract.artifact.fileName
 $pdb = Join-Path $artifactRoot $contract.artifact.pdbFileName
+$antiHookSource = Join-Path $antiHookRoot 'release\AntiHooking.dll'
+$antiHook = Join-Path $artifactRoot 'AntiHooking.dll'
 Copy-Item -LiteralPath $workerSource -Destination $worker
 Copy-Item -LiteralPath $pdbSource -Destination $pdb
+Copy-Item -LiteralPath $antiHookSource -Destination $antiHook
 
 $dumpbin = Join-Path $vcBin 'dumpbin.exe'
 $headers = & $dumpbin /headers $worker 2>&1
@@ -331,6 +371,12 @@ if ($LASTEXITCODE -ne 0 -or ($headers -join "`n") -cnotmatch '(?m)^\s*[0-9A-F]+\
 if (($headers -join "`n") -cnotmatch [Regex]::Escape(
         $contract.artifact.pdbAlternatePath)) {
     throw 'Moonlight.exe does not contain the canonical PDB alternate path.'
+}
+$antiHookHeaders = & $dumpbin /headers $antiHook 2>&1
+if ($LASTEXITCODE -ne 0 -or
+    ($antiHookHeaders -join "`n") -cnotmatch '(?m)^\s*[0-9A-F]+\s+repro\s' -or
+    ($antiHookHeaders -join "`n") -cnotmatch 'AntiHooking\.pdb') {
+    throw 'AntiHooking.dll lacks its reproducible PE/PDB identity.'
 }
 $workerText = [Text.Encoding]::ASCII.GetString(
     [IO.File]::ReadAllBytes($worker))
@@ -414,6 +460,13 @@ $receipt = [ordered]@{
         pdbAlternatePath = $contract.artifact.pdbAlternatePath
         peReproDebugEntry = $true
         embeddedAbsoluteInputPaths = $false
+        antiHooking = [ordered]@{
+            fileName = 'AntiHooking.dll'
+            sha256 = Get-Sha256 $antiHook
+            length = (Get-Item -LiteralPath $antiHook).Length
+            pdbAlternatePath = 'AntiHooking.pdb'
+            peReproDebugEntry = $true
+        }
     }
 }
 $receiptPath = Join-Path $artifactRoot 'reproducible-worker-receipt.json'

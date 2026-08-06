@@ -104,6 +104,19 @@ if ((Get-FileHash -Algorithm SHA256 -LiteralPath $workerA).Hash -cne
         $receiptB.artifact.sha256) {
     throw 'A worker artifact does not match its atomic build receipt.'
 }
+$antiHookA = Join-Path $rootA 'artifact\AntiHooking.dll'
+$antiHookB = Join-Path $rootB 'artifact\AntiHooking.dll'
+$antiHookBytesA = [IO.File]::ReadAllBytes($antiHookA)
+$antiHookBytesB = [IO.File]::ReadAllBytes($antiHookB)
+if (-not [Linq.Enumerable]::SequenceEqual[byte](
+        $antiHookBytesA,
+        $antiHookBytesB) -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $antiHookA).Hash -cne
+        $receiptA.artifact.antiHooking.sha256 -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $antiHookB).Hash -cne
+        $receiptB.artifact.antiHooking.sha256) {
+    throw 'The two clean AntiHooking.dll builds are not byte-for-byte identical.'
+}
 if ($receiptA.contractSha256 -cne $receiptB.contractSha256 -or
     $receiptA.source.forkCommit -cne $receiptB.source.forkCommit -or
     $receiptA.source.sourceTree -cne $receiptB.source.sourceTree -or
@@ -177,6 +190,16 @@ $proof = [ordered]@{
         byteForByteIdentical = $true
         peReproDebugEntry = $true
         embeddedAbsoluteInputPaths = $false
+    }
+    runtimeArtifacts = [ordered]@{
+        antiHooking = [ordered]@{
+            fileName = 'AntiHooking.dll'
+            sha256 = $receiptA.artifact.antiHooking.sha256
+            length = $receiptA.artifact.antiHooking.length
+            byteForByteIdentical = $true
+            peReproDebugEntry = $true
+            embeddedPath = 'AntiHooking.pdb'
+        }
     }
     pdb = [ordered]@{
         fileName = 'Moonlight.pdb'
