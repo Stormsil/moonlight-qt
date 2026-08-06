@@ -39,7 +39,7 @@
   "rootLicense": {
     "spdxExpression": "GPL-3.0-only",
     "path": "LICENSE",
-    "sha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD"
+    "sha256": "589ED823E9A84C56FEB95AC58E7CF384626B9CBF4FDA2A907BC36E103DE1BAD2"
   },
   "sourceComponents": [
     {
@@ -48,7 +48,7 @@
       "commit": "e41355ea01670fd4c830b384009d31dd0339a705",
       "license": "GPL-3.0-only",
       "licensePath": "moonlight-common-c/moonlight-common-c/LICENSE.txt",
-      "licenseSha256": "53927BD0B739D38C87A0A82236FD9B070C2DFFF11C0C119BE50372005D5047AD",
+      "licenseSha256": "589ED823E9A84C56FEB95AC58E7CF384626B9CBF4FDA2A907BC36E103DE1BAD2",
       "provenance": "exact base plus app/argus/common-c/no-input-v1.patch",
       "patchedResultTreeSha256": "7CA47FDF0E9E32FE4DF96E9FB40730E87F1AC8DB397A5E1BB31C9D459F0DEEFD"
     },
@@ -58,7 +58,7 @@
       "commit": "aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
       "license": "MIT",
       "licensePath": "moonlight-common-c/moonlight-common-c/enet/LICENSE",
-      "licenseSha256": "3C326D1182A09BDD48101B7EAB2BF2312C76286E756B46CD24844359D7DFECF3"
+      "licenseSha256": "77F94E3BE39938801163844B8BF9A4F12BADCC0DA136E9886E7DA14A816D74D3"
     },
     {
       "name": "nanors",
@@ -66,7 +66,7 @@
       "commit": "b1e3c22ca0cdc0bb83e3cd6ed1a2fc77869ed99a",
       "license": "MIT",
       "licensePath": "moonlight-common-c/moonlight-common-c/nanors/LICENSE",
-      "licenseSha256": "22372A6DA1D4FBF640798A70C1014FF47B9669E2CD97A98BCA5FC6D38FC67A82"
+      "licenseSha256": "3FDDA5F011D8490331950398E86427D67DFAE05E048681476C2C6B8C34BDD033"
     },
     {
       "name": "qmdnsengine",
@@ -74,7 +74,7 @@
       "commit": "b7a5a9f225d5e14b39f9fd1f905c4f505cf2ee99",
       "license": "MIT",
       "licensePath": "qmdnsengine/qmdnsengine/LICENSE.txt",
-      "licenseSha256": "19F7BC4C95863835A04992FBFE076D209C51A1D98314E0379C0809E9D8784314"
+      "licenseSha256": "F0FE7E9419C8B564491532BB8482B25D299D9F1B84ABA74BB911B61BCD23E0C5"
     },
     {
       "name": "SDL_GameControllerDB",
@@ -82,7 +82,7 @@
       "commit": "8d9fefd7b810f2541f78cc7a8ccbd185bc84c7a5",
       "license": "Zlib",
       "licensePath": "app/SDL_GameControllerDB/LICENSE",
-      "licenseSha256": "6B8DA877F518BAE3E261B2613754CC97E916F20001C5499B4CEA6680AC6D1E1B"
+      "licenseSha256": "97F35B302B361680EC1E891E95D2D52097BB95ABFF361434916D99DC1305F127"
     },
     {
       "name": "h264bitstream",
@@ -90,7 +90,7 @@
       "commit": "NOASSERTION",
       "license": "LGPL-2.1-only",
       "licensePath": "h264bitstream/LICENSE",
-      "licenseSha256": "C3ABD79A304B8E35FFAFD462274B59009D893328FC221F00075116AAABC19804"
+      "licenseSha256": "FDC16967E0022D62197DE82A6EFD65638AF8741A34248C72AE99DF328FF3BB73"
     }
   ],
   "runtimeBinaryFamilies": [
