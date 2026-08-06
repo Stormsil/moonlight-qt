@@ -34,6 +34,8 @@ Assert-Equal '3BE53DEB7B9AB371372FF676C31655CF552CE4040F90423E8293E0E067A619E6' 
     $contract.qt.windeployqtSha256 'windeployqt identity drifted.'
 Assert-Equal 'D0ED426B928FCF322254017822EDD74EDAB6014772CA5098F2583782AC8D965D' `
     $contract.peImportTool.sha256 'PE import tool identity drifted.'
+Assert-Equal 'bin' $contract.qt.peImportClosureSourceRelativePath `
+    'PE import closure source drifted.'
 
 $expectedArguments = @(
     '--dir={runtimeRoot}', '--release', '--qmldir={sourceRoot}/app/gui',

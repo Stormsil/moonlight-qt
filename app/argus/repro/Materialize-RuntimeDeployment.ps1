@@ -191,7 +191,8 @@ Assert-ExactProperties $contract.antiHooking @('fileName', 'sha256', 'length') `
     'Runtime AntiHooking contract'
 Assert-ExactProperties $contract.qt @(
     'treeSha256', 'windeployqtRelativePath', 'windeployqtSha256',
-    'windeployqtVersion', 'arguments', 'requiredRuntimePaths') `
+    'windeployqtVersion', 'peImportClosureSourceRelativePath', 'arguments',
+    'requiredRuntimePaths') `
     'Runtime Qt contract'
 Assert-ExactProperties $contract.dependencies @('treeSha256', 'copyGlob') `
     'Runtime dependency contract'
@@ -313,6 +314,53 @@ $dependencyDlls = @(Get-ChildItem -LiteralPath (
 foreach ($dependency in $dependencyDlls) {
     Copy-Item -LiteralPath $dependency.FullName -Destination $runtime -Force
 }
+$system = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::OrdinalIgnoreCase)
+foreach ($name in $contract.windowsSystemLibraries) { $system.Add($name) | Out-Null }
+$qtClosurePaths = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal)
+do {
+    $addedQtImport = $false
+    $runtimeNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    Get-ChildItem -LiteralPath $runtime -Recurse -File |
+        ForEach-Object { $runtimeNames.Add($_.Name) | Out-Null }
+    $peFiles = @(Get-ChildItem -LiteralPath $runtime -Recurse -File |
+        Where-Object { $_.Extension -in @('.exe', '.dll') })
+    foreach ($peFile in $peFiles) {
+        $importOutput = & $dumpbin /dependents $peFile.FullName 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "dumpbin failed for '$($peFile.FullName)'."
+        }
+        foreach ($line in $importOutput) {
+            if ($line.ToString() -notmatch `
+                '^\s+([A-Za-z0-9_.+\-]+\.(?:dll|drv))\s*$') {
+                continue
+            }
+            $importName = $Matches[1]
+            if ($runtimeNames.Contains($importName) -or
+                $system.Contains($importName) -or
+                $importName.StartsWith(
+                    'api-ms-win-',
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                $importName.StartsWith(
+                    'ext-ms-win-',
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+            $qtImport = Join-Path $qt `
+                "$($contract.qt.peImportClosureSourceRelativePath)\$importName"
+            if (-not (Test-Path -LiteralPath $qtImport -PathType Leaf)) {
+                throw "PE import '$importName' has no pinned runtime source."
+            }
+            Copy-Item -LiteralPath $qtImport `
+                -Destination (Join-Path $runtime $importName)
+            $qtClosurePaths.Add($importName) | Out-Null
+            $runtimeNames.Add($importName) | Out-Null
+            $addedQtImport = $true
+        }
+    }
+} while ($addedQtImport)
 foreach ($required in $contract.qt.requiredRuntimePaths) {
     if (-not (Test-Path -LiteralPath (
             Join-Path $runtime $required.Replace('/', '\')) -PathType Leaf)) {
@@ -384,7 +432,8 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
             'worker-build-output',
             'runtime-anti-hooking',
             'moonlight-source',
-            'moonlight-qt-deps')) {
+            'moonlight-qt-deps') -or
+        $qtClosurePaths.Contains($relative)) {
         $postCopyRules.Add([ordered]@{
             sourceComponent = $component
             sourceRelativePath = $sourceRelative
@@ -403,9 +452,6 @@ foreach ($file in $fileArray) {
     }
     $runtimeByName[$name].Add($file.relativePath)
 }
-$system = [Collections.Generic.HashSet[string]]::new(
-    [StringComparer]::OrdinalIgnoreCase)
-foreach ($name in $contract.windowsSystemLibraries) { $system.Add($name) | Out-Null }
 $peBinaries = [Collections.Generic.List[object]]::new()
 foreach ($file in $fileArray | Where-Object {
         $_.relativePath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) -or
