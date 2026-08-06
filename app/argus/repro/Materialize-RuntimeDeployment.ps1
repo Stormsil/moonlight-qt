@@ -116,8 +116,16 @@ function Resolve-QtSourcePath(
     if (-not $RelativePath.Contains('/')) {
         $candidates.Add((Join-Path $Qt "bin\$RelativePath"))
     }
-    foreach ($prefix in @('plugins', 'qml', 'translations')) {
-        $candidates.Add((Join-Path $Qt "$prefix\$($RelativePath.Replace('/', '\'))"))
+    $candidates.Add((Join-Path $Qt `
+        "plugins\$($RelativePath.Replace('/', '\'))"))
+    foreach ($prefix in @('qml', 'translations')) {
+        if ($RelativePath.StartsWith(
+                "$prefix/",
+                [StringComparison]::Ordinal)) {
+            $withoutPrefix = $RelativePath.Substring($prefix.Length + 1)
+            $candidates.Add((Join-Path $Qt `
+                "$prefix\$($withoutPrefix.Replace('/', '\'))"))
+        }
     }
     $matches = @($candidates | Where-Object {
         Test-Path -LiteralPath $_ -PathType Leaf
