@@ -61,8 +61,21 @@ function Get-TreeSha256([string] $Root) {
     finally { $hash.Dispose() }
 }
 
+function Get-OrdinalSortedObjects([object[]] $Values, [string] $Property) {
+    $ordered = [object[]]@($Values)
+    $comparer = [Collections.Generic.Comparer[object]]::Create(
+        [Comparison[object]] {
+            param($left, $right)
+            [StringComparer]::Ordinal.Compare(
+                [string]$left.$Property,
+                [string]$right.$Property)
+        })
+    [Array]::Sort($ordered, $comparer)
+    $ordered
+}
+
 function Get-SelectedTreeSha256([object[]] $Files) {
-    $ordered = @($Files | Sort-Object RelativePath -CaseSensitive)
+    $ordered = Get-OrdinalSortedObjects $Files 'RelativePath'
     $hash = [Security.Cryptography.IncrementalHash]::CreateHash(
         [Security.Cryptography.HashAlgorithmName]::SHA256)
     try {
@@ -442,7 +455,7 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
         })
     }
 }
-$fileArray = @($files | Sort-Object relativePath -CaseSensitive)
+$fileArray = Get-OrdinalSortedObjects $files.ToArray() 'relativePath'
 
 $runtimeByName = @{}
 foreach ($file in $fileArray) {
@@ -574,7 +587,8 @@ $receipt = [ordered]@{
             [ordered]@{ component = 'qt-windeploy-generated'; treeSha256 = $contract.qt.treeSha256 },
             [ordered]@{ component = 'moonlight-qt-deps'; treeSha256 = $contract.dependencies.treeSha256 },
             [ordered]@{ component = 'moonlight-source'; treeSha256 = Get-SelectedTreeSha256 $sourceInputs })
-        postCopyRules = @($postCopyRules | Sort-Object targetRelativePath -CaseSensitive)
+        postCopyRules = @(Get-OrdinalSortedObjects `
+            $postCopyRules.ToArray() 'targetRelativePath')
         ambientPathAllowed = $false
     }
     directories = $directories
