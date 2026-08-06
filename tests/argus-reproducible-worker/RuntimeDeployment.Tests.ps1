@@ -23,6 +23,9 @@ Assert-Equal '014dc6fff6ed7790c6ff411cec05cbd709d3bad9' `
 Assert-Equal 'C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385' `
     $contract.worker.sha256 'Worker identity drifted.'
 Assert-Equal 2832384 $contract.worker.length 'Worker length drifted.'
+Assert-Equal 'B795CF0072ABA8E313B0F127B01E48B1C328A81D03CBA8B1B121D18420934D14' `
+    $contract.antiHooking.sha256 'AntiHooking identity drifted.'
+Assert-Equal 47104 $contract.antiHooking.length 'AntiHooking length drifted.'
 Assert-Equal 'B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8' `
     $contract.qt.treeSha256 'Qt identity drifted.'
 Assert-Equal '195EFB527A1E3B66EC3A36DFA6D4057FC86384873F957B0A04C72854F1BE8E2E' `

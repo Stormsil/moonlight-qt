@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)] [string] $WorkerBuildRoot,
     [Parameter(Mandatory = $true)] [string] $WorkerReproducibilityProofPath,
+    [Parameter(Mandatory = $true)] [string] $AntiHookingPath,
     [Parameter(Mandatory = $true)] [string] $QtRoot,
     [Parameter(Mandatory = $true)] [string] $SourceRoot,
     [Parameter(Mandatory = $true)] [string] $ToolchainRoot,
@@ -150,6 +151,7 @@ function Write-AtomicJson([object] $Value, [string] $Path) {
 
 $build = (Resolve-Path -LiteralPath $WorkerBuildRoot).Path
 $proofPath = (Resolve-Path -LiteralPath $WorkerReproducibilityProofPath).Path
+$antiHookSource = (Resolve-Path -LiteralPath $AntiHookingPath).Path
 $qt = (Resolve-Path -LiteralPath $QtRoot).Path
 $source = (Resolve-Path -LiteralPath $SourceRoot).Path
 $toolchain = (Resolve-Path -LiteralPath $ToolchainRoot).Path
@@ -172,11 +174,13 @@ $contractPath = Join-Path $authority 'app\argus\repro\runtime-deployment-v1.json
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
 Assert-ExactProperties $contract @(
     'schemaVersion', 'manifestSchemaVersion', 'inventoryAlgorithm',
-    'requiredAncestor', 'worker', 'qt', 'dependencies', 'peImportTool',
+    'requiredAncestor', 'worker', 'antiHooking', 'qt', 'dependencies', 'peImportTool',
     'windowsSystemLibraries', 'ambientPathAllowed', 'distributionAllowed',
     'legalApproval') 'Runtime deployment contract'
 Assert-ExactProperties $contract.worker @('fileName', 'sha256', 'length') `
     'Runtime worker contract'
+Assert-ExactProperties $contract.antiHooking @('fileName', 'sha256', 'length') `
+    'Runtime AntiHooking contract'
 Assert-ExactProperties $contract.qt @(
     'treeSha256', 'windeployqtRelativePath', 'windeployqtSha256',
     'windeployqtVersion', 'arguments', 'requiredRuntimePaths') `
@@ -205,7 +209,6 @@ $buildReceiptPath = Join-Path $build 'artifact\reproducible-worker-receipt.json'
 $buildReceipt = Get-Content -Raw -LiteralPath $buildReceiptPath | ConvertFrom-Json
 $proof = Get-Content -Raw -LiteralPath $proofPath | ConvertFrom-Json
 $workerSource = Join-Path $build 'artifact\Moonlight.exe'
-$antiHookSource = Join-Path $build 'artifact\AntiHooking.dll'
 $gameControllerSource = Join-Path $source `
     'app\SDL_GameControllerDB\gamecontrollerdb.txt'
 if ($buildReceipt.schemaVersion -ne 2 -or $proof.schemaVersion -ne 2 -or
@@ -218,6 +221,11 @@ if ($buildReceipt.schemaVersion -ne 2 -or $proof.schemaVersion -ne 2 -or
 Assert-Hash $workerSource $contract.worker.sha256 'Moonlight.exe'
 if ((Get-Item -LiteralPath $workerSource).Length -ne $contract.worker.length) {
     throw 'Moonlight.exe length drifted.'
+}
+Assert-Hash $antiHookSource $contract.antiHooking.sha256 'AntiHooking.dll'
+if ((Get-Item -LiteralPath $antiHookSource).Length -ne
+    $contract.antiHooking.length) {
+    throw 'AntiHooking.dll length drifted.'
 }
 if ($proof.worker.sha256 -cne $contract.worker.sha256 -or
     $proof.worker.length -ne $contract.worker.length) {
@@ -331,7 +339,7 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
         $sourceRelative = 'artifact/Moonlight.exe'
     }
     elseif ($relative -ceq 'AntiHooking.dll') {
-        $component = 'worker-build-output'
+        $component = 'runtime-anti-hooking'
         $sourceRelative = 'artifact/AntiHooking.dll'
     }
     elseif ($relative -ceq 'gamecontrollerdb.txt') {
@@ -458,12 +466,24 @@ $sourceInputs = @($fileArray | Where-Object {
             Sha256 = $_.sha256
         }
     })
+$antiHookInputs = @($fileArray | Where-Object {
+    $_.provenanceComponent -ceq 'runtime-anti-hooking' } | ForEach-Object {
+        [pscustomobject]@{
+            RelativePath = $_.relativePath
+            Length = $_.length
+            Sha256 = $_.sha256
+        }
+    })
+$producerCommit = (& git -C $authority rev-parse HEAD).Trim()
+$producerTree = (& git -C $authority rev-parse 'HEAD^{tree}').Trim()
 $receipt = [ordered]@{
     schemaVersion = 1
     manifestSchemaVersion = 6
     workerSha256 = $contract.worker.sha256
     nativeSourceCommit = $proof.sourceCommit
     nativeSourceTree = $proof.sourceTree
+    runtimeContractSourceCommit = $producerCommit
+    runtimeContractSourceTree = $producerTree
     buildContractSha256 = $proof.contractSha256
     workerReproducibilityProofSha256 = Get-Sha256 $proofPath
     qtTreeSha256 = $contract.qt.treeSha256
@@ -482,6 +502,7 @@ $receipt = [ordered]@{
         windeployQtFlags = @($contract.qt.arguments)
         sourceRoots = @(
             [ordered]@{ component = 'worker-build-output'; treeSha256 = Get-SelectedTreeSha256 $workerInputs },
+            [ordered]@{ component = 'runtime-anti-hooking'; treeSha256 = Get-SelectedTreeSha256 $antiHookInputs },
             [ordered]@{ component = 'qt'; treeSha256 = $contract.qt.treeSha256 },
             [ordered]@{ component = 'moonlight-qt-deps'; treeSha256 = $contract.dependencies.treeSha256 },
             [ordered]@{ component = 'moonlight-source'; treeSha256 = Get-SelectedTreeSha256 $sourceInputs })
