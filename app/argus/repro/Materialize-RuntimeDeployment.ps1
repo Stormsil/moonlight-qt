@@ -204,7 +204,8 @@ $contractPath = Join-Path $authority 'app\argus\repro\runtime-deployment-v1.json
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
 Assert-ExactProperties $contract @(
     'schemaVersion', 'manifestSchemaVersion', 'inventoryAlgorithm',
-    'requiredAncestor', 'worker', 'antiHooking', 'qt', 'dependencies', 'peImportTool',
+    'requiredAncestor', 'worker', 'antiHooking', 'qt', 'dependencies',
+    'msvcRuntime', 'peImportTool',
     'windowsSystemLibraries', 'ambientPathAllowed', 'distributionAllowed',
     'legalApproval') 'Runtime deployment contract'
 Assert-ExactProperties $contract.worker @('fileName', 'sha256', 'length') `
@@ -223,6 +224,13 @@ foreach ($rule in $contract.qt.postCopyRules) {
 }
 Assert-ExactProperties $contract.dependencies @('treeSha256', 'copyGlob') `
     'Runtime dependency contract'
+Assert-ExactProperties $contract.msvcRuntime @('treeSha256', 'copyRules') `
+    'Runtime MSVC contract'
+foreach ($rule in $contract.msvcRuntime.copyRules) {
+    Assert-ExactProperties $rule @(
+        'sourceRelativePath', 'targetRelativePath', 'sha256', 'length') `
+        'Runtime MSVC copy rule'
+}
 Assert-ExactProperties $contract.peImportTool @('relativePath', 'sha256') `
     'Runtime PE import contract'
 if ($contract.schemaVersion -ne 1 -or
@@ -284,6 +292,10 @@ $dependenciesRoot = Join-Path $source 'libs\windows'
 if ((Get-TreeSha256 $dependenciesRoot) -cne
     $contract.dependencies.treeSha256) {
     throw 'Runtime dependency tree drifted.'
+}
+$msvcRoot = Join-Path $toolchain 'msvc'
+if ((Get-TreeSha256 $msvcRoot) -cne $contract.msvcRuntime.treeSha256) {
+    throw 'Runtime MSVC input tree drifted.'
 }
 $windeployqt = Join-Path $qt `
     $contract.qt.windeployqtRelativePath.Replace('/', '\')
@@ -350,6 +362,21 @@ foreach ($rule in $contract.qt.postCopyRules) {
     [IO.Directory]::CreateDirectory((Split-Path -Parent $copyTarget)) |
         Out-Null
     Copy-Item -LiteralPath $copySource -Destination $copyTarget -Force
+}
+
+$msvcRuntimeByName = @{}
+foreach ($rule in $contract.msvcRuntime.copyRules) {
+    $copySource = Join-Path $msvcRoot `
+        $rule.sourceRelativePath.Replace('/', '\')
+    $copyTarget = Join-Path $runtime `
+        $rule.targetRelativePath.Replace('/', '\')
+    Assert-Hash $copySource $rule.sha256 `
+        "MSVC runtime source $($rule.sourceRelativePath)"
+    if ((Get-Item -LiteralPath $copySource).Length -ne $rule.length) {
+        throw "MSVC runtime source '$($rule.sourceRelativePath)' length drifted."
+    }
+    Copy-Item -LiteralPath $copySource -Destination $copyTarget
+    $msvcRuntimeByName[$rule.targetRelativePath] = $rule
 }
 
 $dependencyDlls = @(Get-ChildItem -LiteralPath (
@@ -452,6 +479,14 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
         Assert-Hash $file.FullName (Get-Sha256 $dependencyByName[$file.Name]) `
             "runtime dependency $relative"
     }
+    elseif (-not $relative.Contains('/') -and
+        $msvcRuntimeByName.ContainsKey($relative)) {
+        $component = 'msvc-runtime'
+        $sourceRelative =
+            $msvcRuntimeByName[$relative].sourceRelativePath
+        Assert-Hash $file.FullName $msvcRuntimeByName[$relative].sha256 `
+            "runtime MSVC dependency $relative"
+    }
     else {
         $sourceRelative = Resolve-QtSourcePath $relative $qt $file.FullName
         if ($null -eq $sourceRelative) {
@@ -478,7 +513,8 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
             'worker-build-output',
             'runtime-anti-hooking',
             'moonlight-source',
-            'moonlight-qt-deps') -or
+            'moonlight-qt-deps',
+            'msvc-runtime') -or
         $qtClosurePaths.Contains($relative) -or $explicitQtCopy) {
         $postCopyRules.Add([ordered]@{
             sourceComponent = $component
@@ -623,6 +659,7 @@ $receipt = [ordered]@{
             [ordered]@{ component = 'qt'; treeSha256 = $contract.qt.treeSha256 },
             [ordered]@{ component = 'qt-windeploy-generated'; treeSha256 = $contract.qt.treeSha256 },
             [ordered]@{ component = 'moonlight-qt-deps'; treeSha256 = $contract.dependencies.treeSha256 },
+            [ordered]@{ component = 'msvc-runtime'; treeSha256 = $contract.msvcRuntime.treeSha256 },
             [ordered]@{ component = 'moonlight-source'; treeSha256 = Get-SelectedTreeSha256 $sourceInputs })
         postCopyRules = @(Get-OrdinalSortedObjects `
             $postCopyRules.ToArray() 'targetRelativePath')

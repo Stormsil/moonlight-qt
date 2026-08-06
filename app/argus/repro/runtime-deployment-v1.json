@@ -50,15 +50,55 @@
     "requiredRuntimePaths": [
       "AntiHooking.dll",
       "gamecontrollerdb.txt",
+      "msvcp140.dll",
+      "msvcp140_1.dll",
+      "msvcp140_2.dll",
       "platforms/qwindows.dll",
       "tls/qcertonlybackend.dll",
       "tls/qopensslbackend.dll",
-      "tls/qschannelbackend.dll"
+      "tls/qschannelbackend.dll",
+      "vcruntime140.dll",
+      "vcruntime140_1.dll"
     ]
   },
   "dependencies": {
     "treeSha256": "195EFB527A1E3B66EC3A36DFA6D4057FC86384873F957B0A04C72854F1BE8E2E",
     "copyGlob": "libs/windows/lib/x64/*.dll"
+  },
+  "msvcRuntime": {
+    "treeSha256": "D8C03D0942DA022626E335EB1E6FAF1EA018B21DBC10205528BD692706B58CEF",
+    "copyRules": [
+      {
+        "sourceRelativePath": "bin/Hostx64/x64/msvcp140.dll",
+        "targetRelativePath": "msvcp140.dll",
+        "sha256": "81A40B7BACA6E7570E32D802752C0DEC43FADF700CD5F118154384A857F82580",
+        "length": 643432
+      },
+      {
+        "sourceRelativePath": "bin/Hostx64/x64/msvcp140_1.dll",
+        "targetRelativePath": "msvcp140_1.dll",
+        "sha256": "CA86CD82A6CBFA60036CD7042CC61CFBB78861A8F34479DCEE26D708AFE415E9",
+        "length": 35768
+      },
+      {
+        "sourceRelativePath": "bin/Hostx64/x64/msvcp140_2.dll",
+        "targetRelativePath": "msvcp140_2.dll",
+        "sha256": "FEF3FDCB632A240DFA4DAE66042DED2C147AA1BD4B16AF849C80DA07BAD649AD",
+        "length": 274872
+      },
+      {
+        "sourceRelativePath": "bin/Hostx64/x64/vcruntime140.dll",
+        "targetRelativePath": "vcruntime140.dll",
+        "sha256": "63DADDE90AC2FDCD43BEEF228646E1C969133CFD6AD6F9B675251B8E32366858",
+        "length": 178544
+      },
+      {
+        "sourceRelativePath": "bin/Hostx64/x64/vcruntime140_1.dll",
+        "targetRelativePath": "vcruntime140_1.dll",
+        "sha256": "C014DB74910A6A4174C263EBF58E3AE0D276DC03F9F3C5955C781A548BF9BE8A",
+        "length": 50032
+      }
+    ]
   },
   "peImportTool": {
     "relativePath": "msvc/bin/Hostx64/x64/dumpbin.exe",
@@ -95,9 +135,6 @@
     "mpr.dll",
     "msimg32.dll",
     "msvcrt.dll",
-    "msvcp140.dll",
-    "msvcp140_1.dll",
-    "msvcp140_2.dll",
     "ncrypt.dll",
     "netapi32.dll",
     "normaliz.dll",
@@ -120,8 +157,6 @@
     "uxtheme.dll",
     "uiautomationcore.dll",
     "version.dll",
-    "vcruntime140.dll",
-    "vcruntime140_1.dll",
     "winhttp.dll",
     "wininet.dll",
     "winmm.dll",
