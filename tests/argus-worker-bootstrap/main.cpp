@@ -20,6 +20,7 @@
 #include <openssl/x509.h>
 
 #include <limits>
+#include <cstdio>
 #include <thread>
 #include <vector>
 
@@ -1205,6 +1206,38 @@ StreamControlOutcome executeStreamControl(
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
+
+    if (app.arguments().size() == 2
+            && app.arguments().at(1)
+                == QStringLiteral("--identity-package-stdin")) {
+        QFile packageFile;
+        check(packageFile.open(stdin, QIODevice::ReadOnly),
+              "Managed identity fixture must be readable");
+        IdentityManager::ProcessIdentity identity;
+        check(ArgusWorker::PairingIdentityPackage::decode(
+                  QLatin1String(ArgusWorker::PairingIdentityFormat),
+                  packageFile.readAll(),
+                  identity)
+                  == ArgusWorker::PairingIdentityPackageStatus::Accepted,
+              "Managed identity fixture must decode");
+        check(IdentityManager::installProcessIdentity(std::move(identity))
+                  == IdentityManager::ProcessIdentityInstallResult::Installed,
+              "Managed identity fixture must install");
+        IdentityManager* manager = IdentityManager::get();
+        const QSslConfiguration ssl = manager->getSslConfig();
+        check(!manager->getUniqueId().isEmpty()
+                  && !ssl.localCertificate().isNull()
+                  && !ssl.privateKey().isNull(),
+              "Managed identity fixture must initialize TLS identity");
+        return failures == 0 ? 0 : 1;
+    }
+
+    if (app.arguments().size() == 2
+            && app.arguments().at(1)
+                == QStringLiteral("--identity-only")) {
+        checkIdentityPackageAndInstall();
+        return failures == 0 ? 0 : 1;
+    }
 
     check(!selectsWorker({"Moonlight.exe"}),
           "No-argument interactive startup must not select Argus worker mode");
