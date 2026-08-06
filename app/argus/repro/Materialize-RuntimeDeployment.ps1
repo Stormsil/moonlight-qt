@@ -74,6 +74,15 @@ function Get-OrdinalSortedObjects([object[]] $Values, [string] $Property) {
     $ordered
 }
 
+function Get-OrdinalSortedStrings([string[]] $Values) {
+    $unique = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($value in $Values) { $unique.Add($value) | Out-Null }
+    $ordered = [string[]]@($unique)
+    [Array]::Sort($ordered, [StringComparer]::OrdinalIgnoreCase)
+    $ordered
+}
+
 function Get-SelectedTreeSha256([object[]] $Files) {
     $ordered = Get-OrdinalSortedObjects $Files 'RelativePath'
     $hash = [Security.Cryptography.IncrementalHash]::CreateHash(
@@ -475,12 +484,11 @@ foreach ($file in $fileArray | Where-Object {
         throw "dumpbin failed for '$($file.relativePath)'."
     }
     $imports = [Collections.Generic.List[object]]::new()
-    $names = @($output | ForEach-Object {
+    $names = Get-OrdinalSortedStrings @($output | ForEach-Object {
         if ($_.ToString() -match '^\s+([A-Za-z0-9_.+\-]+\.(?:dll|drv))\s*$') {
             $Matches[1]
         }
-    } | Sort-Object -Unique)
-    [Array]::Sort($names, [StringComparer]::OrdinalIgnoreCase)
+    })
     foreach ($name in $names) {
         $key = $name.ToLowerInvariant()
         $resolved = $null
