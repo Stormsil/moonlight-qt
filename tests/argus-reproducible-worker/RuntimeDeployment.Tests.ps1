@@ -55,11 +55,18 @@ Assert-Equal ($expectedArguments -join "`n") `
 foreach ($required in @(
         'AntiHooking.dll', 'gamecontrollerdb.txt',
         'platforms/qwindows.dll', 'tls/qcertonlybackend.dll',
+        'tls/qopensslbackend.dll',
         'tls/qschannelbackend.dll')) {
     if (@($contract.qt.requiredRuntimePaths) -cnotcontains $required) {
         throw "Required runtime path '$required' is unbound."
     }
 }
+$opensslRule = @($contract.qt.postCopyRules | Where-Object {
+    $_.targetRelativePath -ceq 'tls/qopensslbackend.dll'
+})
+Assert-Equal 1 $opensslRule.Count 'OpenSSL TLS plugin copy rule drifted.'
+Assert-Equal 'BD6C98ABD328149E7E3CFA651753AB8654F404C9D63ACED7006B3863E6F5AA26' `
+    $opensslRule[0].sha256 'OpenSSL TLS plugin identity drifted.'
 if ($contract.ambientPathAllowed -ne $false -or
     $contract.distributionAllowed -ne $false -or
     $contract.legalApproval -ne $false) {

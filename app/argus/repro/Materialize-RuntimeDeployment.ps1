@@ -213,9 +213,14 @@ Assert-ExactProperties $contract.antiHooking @('fileName', 'sha256', 'length') `
     'Runtime AntiHooking contract'
 Assert-ExactProperties $contract.qt @(
     'treeSha256', 'windeployqtRelativePath', 'windeployqtSha256',
-    'windeployqtVersion', 'peImportClosureSourceRelativePath', 'arguments',
-    'requiredRuntimePaths') `
+    'windeployqtVersion', 'peImportClosureSourceRelativePath', 'postCopyRules',
+    'arguments', 'requiredRuntimePaths') `
     'Runtime Qt contract'
+foreach ($rule in $contract.qt.postCopyRules) {
+    Assert-ExactProperties $rule @(
+        'sourceRelativePath', 'targetRelativePath', 'sha256', 'length') `
+        'Runtime Qt post-copy rule'
+}
 Assert-ExactProperties $contract.dependencies @('treeSha256', 'copyGlob') `
     'Runtime dependency contract'
 Assert-ExactProperties $contract.peImportTool @('relativePath', 'sha256') `
@@ -333,6 +338,19 @@ try {
     }
 }
 finally { $env:PATH = $oldPath }
+
+foreach ($rule in $contract.qt.postCopyRules) {
+    $copySource = Join-Path $qt $rule.sourceRelativePath.Replace('/', '\')
+    $copyTarget = Join-Path $runtime $rule.targetRelativePath.Replace('/', '\')
+    Assert-Hash $copySource $rule.sha256 `
+        "Qt post-copy source $($rule.sourceRelativePath)"
+    if ((Get-Item -LiteralPath $copySource).Length -ne $rule.length) {
+        throw "Qt post-copy source '$($rule.sourceRelativePath)' length drifted."
+    }
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $copyTarget)) |
+        Out-Null
+    Copy-Item -LiteralPath $copySource -Destination $copyTarget -Force
+}
 
 $dependencyDlls = @(Get-ChildItem -LiteralPath (
     Join-Path $dependenciesRoot 'lib\x64') -Filter *.dll -File)
@@ -453,12 +471,15 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
         sha256 = $sha
         provenanceComponent = $component
     })
+    $explicitQtCopy = @($contract.qt.postCopyRules | Where-Object {
+        $_.targetRelativePath -ceq $relative
+    }).Count -eq 1
     if ($component -in @(
             'worker-build-output',
             'runtime-anti-hooking',
             'moonlight-source',
             'moonlight-qt-deps') -or
-        $qtClosurePaths.Contains($relative)) {
+        $qtClosurePaths.Contains($relative) -or $explicitQtCopy) {
         $postCopyRules.Add([ordered]@{
             sourceComponent = $component
             sourceRelativePath = $sourceRelative
