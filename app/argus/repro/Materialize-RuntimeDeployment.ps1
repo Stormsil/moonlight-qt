@@ -231,6 +231,9 @@ $status = @(& git -C $authority status --porcelain=v1 --untracked-files=all)
 if ($LASTEXITCODE -ne 0 -or $status.Count -ne 0) {
     throw 'SourceAuthorityRoot must be a clean Git worktree.'
 }
+$producerCommit = (& git -C $authority rev-parse HEAD).Trim()
+$producerTree = (& git -C $authority rev-parse 'HEAD^{tree}').Trim()
+$contractSha256 = Get-Sha256 $contractPath
 & git -C $authority merge-base --is-ancestor $contract.requiredAncestor HEAD
 if ($LASTEXITCODE -ne 0) {
     throw 'Runtime deployment source does not descend from the required producer.'
@@ -562,8 +565,13 @@ $antiHookInputs = @($fileArray | Where-Object {
             Sha256 = $_.sha256
         }
     })
-$producerCommit = (& git -C $authority rev-parse HEAD).Trim()
-$producerTree = (& git -C $authority rev-parse 'HEAD^{tree}').Trim()
+$finalStatus = @(& git -C $authority status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0 -or $finalStatus.Count -ne 0 -or
+    (& git -C $authority rev-parse HEAD).Trim() -cne $producerCommit -or
+    (& git -C $authority rev-parse 'HEAD^{tree}').Trim() -cne $producerTree -or
+    (Get-Sha256 $contractPath) -cne $contractSha256) {
+    throw 'Runtime deployment source authority changed during materialization.'
+}
 $receipt = [ordered]@{
     schemaVersion = 1
     manifestSchemaVersion = 6

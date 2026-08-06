@@ -72,5 +72,10 @@ if ($buildScript -cnotmatch 'LDFLAGS=.*PDBALTPATH:AntiHooking\.pdb' -or
     $buildScript -cnotmatch '\$antiHook = Join-Path \$artifactRoot') {
     throw 'The independent reproducible AntiHooking.dll build is missing.'
 }
+$materializer = Get-Content -Raw -LiteralPath (Join-Path $sourceRoot `
+    'app\argus\repro\Materialize-RuntimeDeployment.ps1')
+if ($materializer -cnotmatch 'source authority changed during materialization') {
+    throw 'Runtime materialization does not revalidate producer authority.'
+}
 
 Write-Output 'Runtime deployment contract tests passed.'
