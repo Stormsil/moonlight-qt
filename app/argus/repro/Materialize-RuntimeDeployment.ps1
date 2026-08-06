@@ -130,8 +130,11 @@ function Resolve-QtSourcePath(
     $matches = @($candidates | Where-Object {
         Test-Path -LiteralPath $_ -PathType Leaf
     } | Where-Object { (Get-Sha256 $_) -ceq (Get-Sha256 $RuntimeFile) })
-    if ($matches.Count -ne 1) {
+    if ($matches.Count -gt 1) {
         throw "Runtime file '$RelativePath' has no unique Qt provenance."
+    }
+    if ($matches.Count -eq 0) {
+        return $null
     }
     [IO.Path]::GetRelativePath($Qt, $matches[0]).Replace('\', '/')
 }
@@ -360,6 +363,15 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
     }
     else {
         $sourceRelative = Resolve-QtSourcePath $relative $qt $file.FullName
+        if ($null -eq $sourceRelative) {
+            if (-not $relative.StartsWith(
+                    'translations/',
+                    [StringComparison]::Ordinal)) {
+                throw "Runtime file '$relative' has no Qt provenance."
+            }
+            $component = 'qt-windeploy-generated'
+            $sourceRelative = "generated/$relative"
+        }
     }
     $sha = Get-Sha256 $file.FullName
     $files.Add([ordered]@{
@@ -368,7 +380,11 @@ foreach ($file in Get-ChildItem -LiteralPath $runtime -Recurse -File) {
         sha256 = $sha
         provenanceComponent = $component
     })
-    if ($component -cne 'qt') {
+    if ($component -in @(
+            'worker-build-output',
+            'runtime-anti-hooking',
+            'moonlight-source',
+            'moonlight-qt-deps')) {
         $postCopyRules.Add([ordered]@{
             sourceComponent = $component
             sourceRelativePath = $sourceRelative
@@ -509,6 +525,7 @@ $receipt = [ordered]@{
             [ordered]@{ component = 'worker-build-output'; treeSha256 = Get-SelectedTreeSha256 $workerInputs },
             [ordered]@{ component = 'runtime-anti-hooking'; treeSha256 = Get-SelectedTreeSha256 $antiHookInputs },
             [ordered]@{ component = 'qt'; treeSha256 = $contract.qt.treeSha256 },
+            [ordered]@{ component = 'qt-windeploy-generated'; treeSha256 = $contract.qt.treeSha256 },
             [ordered]@{ component = 'moonlight-qt-deps'; treeSha256 = $contract.dependencies.treeSha256 },
             [ordered]@{ component = 'moonlight-source'; treeSha256 = Get-SelectedTreeSha256 $sourceInputs })
         postCopyRules = @($postCopyRules | Sort-Object targetRelativePath -CaseSensitive)
