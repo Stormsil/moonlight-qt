@@ -75,6 +75,7 @@
     "dxva2.dll",
     "gdi32.dll",
     "hid.dll",
+    "icuuc.dll",
     "imm32.dll",
     "iphlpapi.dll",
     "kernel32.dll",
