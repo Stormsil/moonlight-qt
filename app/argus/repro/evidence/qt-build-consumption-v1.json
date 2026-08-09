@@ -3,9 +3,9 @@
   "scope": "argus-reproducible-worker-release-x64",
   "callGraph": {
     "entryPoint": "app/argus/repro/Verify-ReproducibleWorker.ps1",
-    "entryPointSha256": "CBC0302140F58AF2ECCDFD9D990DCDB1B8A6EDC972DFC39624DBA779171F485A",
+    "entryPointSha256": "72D7404B5E91FB9624AB2BC9608B39E1D5D23F322273B596FF07C1D38B33FD48",
     "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
-    "buildScriptSha256": "C7FE9B2515460CE7F38C87C2B54BF36D52643B4FE91DA6555B4F4056AF180517",
+    "buildScriptSha256": "7A411B36F68294DA2246ACA1C18F8C1785649D00CBC64576C6B704944A27541D",
     "releaseX64Commands": [
       "<qt-root>/bin/qmake.exe -o Makefile <source-root>/moonlight-qt.pro ARGUS_COMMON_C_DIR=<materialized-common-c>",
       "<source-root>/scripts/jom.exe -f Makefile release"

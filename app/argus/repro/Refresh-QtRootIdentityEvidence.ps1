@@ -75,6 +75,16 @@ function Write-AtomicJson {
     }
 }
 
+function Get-CrLfFileSha256 {
+    param([string] $Path)
+
+    $text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $Path).Path)
+    $canonical = $text.Replace("`r`n", "`n").Replace("`n", "`r`n")
+    return [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.UTF8Encoding]::new($false).GetBytes($canonical)))
+}
+
 $qtRoots = @(
     (Resolve-Path -LiteralPath $QtRootA).Path,
     (Resolve-Path -LiteralPath $QtRootB).Path,
@@ -273,6 +283,17 @@ if ($consumption.schemaVersion -ne 1 -or
         $canonicalQtSha256) {
     throw 'The Qt build-consumption receipt is not the admitted evidence.'
 }
+$sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$consumption.callGraph.entryPointSha256 =
+    (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        (Join-Path $sourceRoot `
+            'app\argus\repro\Verify-ReproducibleWorker.ps1')).Hash
+$consumption.callGraph.buildScriptSha256 =
+    (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        (Join-Path $sourceRoot `
+            'app\argus\repro\Build-ReproducibleWorker.ps1')).Hash
+$consumption.callGraph.repositoryBuildArchScriptSha256 =
+    Get-CrLfFileSha256 (Join-Path $sourceRoot 'scripts\build-arch.bat')
 Set-JsonProperty $consumption.threeRootIdentity `
     'qtRootIdentitySha256' $rootIdentities
 $consumption.threeRootIdentity.materializationReceiptSha256 =
