@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $workerSha256 =
-    'C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385'
+    'AB4933F865EA3D58B9A4C7DE9D14AAF31002D6969C66E11EF1FDB39FA93919CE'
 $canonicalQtSha256 =
     'B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8'
 $packageReceiptSha256 =
@@ -162,18 +162,13 @@ $buildRoots = @(
 $atomicReceiptPaths = @($buildRoots | ForEach-Object {
         Join-Path $_ 'artifact\reproducible-worker-receipt.json'
     })
-$originalProofLines = & git -C (Resolve-Path -LiteralPath $BotRoot).Path `
-    show `
-    'd8e4f97d:tools/Argus.StreamWorker.Harness/evidence/package-v1/reproducible-worker-proof.json' `
-    2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "Git could not read the original atomic proof: $($originalProofLines -join [Environment]::NewLine)"
-}
-$originalProof = ($originalProofLines -join "`n") | ConvertFrom-Json
+$originalProof = Get-Content -Raw -LiteralPath `
+    (Resolve-Path -LiteralPath $ProofPath) | ConvertFrom-Json
 if ($originalProof.schemaVersion -ne 2 -or
     $originalProof.worker.sha256 -cne $workerSha256 -or
+    $originalProof.worker.byteForByteIdentical -ne $true -or
     $originalProof.buildReceipts.Count -ne 2) {
-    throw 'The preserved original atomic proof is invalid.'
+    throw 'The current atomic proof is invalid.'
 }
 for ($index = 0; $index -lt 2; $index++) {
     $originalBytes = [Convert]::FromBase64String(
@@ -181,7 +176,7 @@ for ($index = 0; $index -lt 2; $index++) {
     if ([Convert]::ToHexString(
             [Security.Cryptography.SHA256]::HashData($originalBytes)) -cne
         $originalProof.buildReceipts[$index].sha256) {
-        throw 'An original atomic build receipt hash is invalid.'
+        throw 'An atomic build receipt hash is invalid.'
     }
     [IO.File]::WriteAllBytes($atomicReceiptPaths[$index], $originalBytes)
     $atomic = [Text.Encoding]::UTF8.GetString($originalBytes) |
@@ -237,6 +232,21 @@ if ($sourceInventory.schemaVersion -ne 4 -or
 }
 Set-JsonProperty $sourceInventory.qtInput 'rootIdentityAlgorithm' `
     'sha256-uppercase-normalized-absolute-path-utf8-v1'
+Set-JsonProperty $sourceInventory 'sourceBranch' `
+    'fix/issue-975-request-validation'
+Set-JsonProperty $sourceInventory 'artifactSourceCommit' `
+    $proof.source.forkCommit
+Set-JsonProperty $sourceInventory 'artifactSourceTree' `
+    $proof.source.sourceTree
+Set-JsonProperty $sourceInventory 'artifactSha256' $workerSha256
+Set-JsonProperty $correspondingSource 'sourceBranch' `
+    'fix/issue-975-request-validation'
+Set-JsonProperty $correspondingSource 'artifactSourceCommit' `
+    $proof.source.forkCommit
+Set-JsonProperty $correspondingSource 'artifactSourceTree' `
+    $proof.source.sourceTree
+Set-JsonProperty $correspondingSource 'buildLogicCommitAuthority' `
+    $proof.source.forkCommit
 Set-JsonProperty $correspondingSource.reproducibleBuild `
     'qtRootIdentitySha256' @($rootIdentities[0], $rootIdentities[1])
 Set-JsonProperty $correspondingSource.reproducibleBuild `
@@ -244,6 +254,9 @@ Set-JsonProperty $correspondingSource.reproducibleBuild `
     'app/argus/repro/Refresh-QtRootIdentityEvidence.ps1'
 $correspondingSource.reproducibleBuild.twoBuildProofSha256 =
     (Get-FileHash -Algorithm SHA256 -LiteralPath $ProofPath).Hash
+$correspondingSource.reproducibleBuild.contractSha256 =
+    $proof.contractSha256
+$correspondingSource.reproducibleBuild.workerSha256 = $workerSha256
 $correspondingSource.reproducibleBuild.buildReceiptSha256 = @(
     $atomicReceiptPaths | ForEach-Object {
         (Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash
