@@ -3,6 +3,7 @@
 #include "pairingidentitypackage.h"
 #include "startupchannel.h"
 #include "streamclient.h"
+#include "streamrequestvalidation.h"
 
 #include <QCoreApplication>
 #include <QScopeGuard>
@@ -200,12 +201,14 @@ int runStartup(const QStringList& arguments)
             return ExitHandshakeUnavailable;
         }
         StreamControlResponse response;
-        if (!isStreamInputIsolationSupported()) {
+        const StreamRequestValidationFailure validationFailure =
+            classifyInputIsolation(isStreamInputIsolationSupported());
+        if (validationFailure != StreamRequestValidationFailure::None) {
             response.setOutcome(
                 session,
                 StreamControlOutcome::Rejected,
                 StreamControlPhase::RequestValidation,
-                0,
+                streamRequestValidationFailureCode(validationFailure),
                 true);
             endpoint.fill(QChar('\0'));
             endpoint.clear();

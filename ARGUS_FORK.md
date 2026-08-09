@@ -109,6 +109,23 @@ also proved wrong-PIN, unavailable-host, wrong-certificate, listener-ownership,
 empty worker-output, and cleanup gates. This is pairing evidence only; it does
 not claim a stream or decoded frame.
 
+Stream-control `RequestValidation` rejection keeps the existing outcome and
+phase fields and carries exactly one stable bounded integer subcode:
+
+- `1001` input isolation unavailable;
+- `1002` startup endpoint mismatch;
+- `1003` startup display missing;
+- `1004` startup display mismatch;
+- `1005` startup frame-slot mismatch;
+- `1006` endpoint invalid;
+- `1007` server certificate invalid;
+- `1008` frame-slot open failed;
+- `1009` decoded-frame sink install failed.
+
+These codes classify only the branch. They never carry endpoint/display text,
+certificate or identity material, paths, frame data, logs, or arbitrary native
+messages. Unknown values are not part of the contract.
+
 ## Reuse seams
 
 - Worker pairing reuses the existing `NvPairingManager -> IdentityManager`

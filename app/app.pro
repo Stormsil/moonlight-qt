@@ -173,6 +173,7 @@ SOURCES += \
     argus/pairingidentitypackage.cpp \
     argus/startupchannel.cpp \
     argus/streamclient.cpp \
+    argus/streamrequestvalidation.cpp \
     argus/workerbootstrap.cpp \
     backend/nvaddress.cpp \
     backend/nvapp.cpp \
@@ -222,6 +223,7 @@ HEADERS += \
     argus/pairingidentitypackage.h \
     argus/startupchannel.h \
     argus/streamclient.h \
+    argus/streamrequestvalidation.h \
     argus/workerbootstrap.h \
     SDL_compat.h \
     backend/nvaddress.h \

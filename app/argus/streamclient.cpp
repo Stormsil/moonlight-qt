@@ -2,6 +2,7 @@
 
 #include "decodedframesink.h"
 #include "pairingendpoint.h"
+#include "streamrequestvalidation.h"
 #include "backend/nvaddress.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
@@ -15,25 +16,27 @@
 #include <algorithm>
 #include <stdexcept>
 
+namespace ArgusWorker
+{
+
 namespace
 {
 
-bool sameFrameSlot(
-    const ArgusWorker::StartupFrameSlotDescriptor& left,
-    const ArgusWorker::StartupFrameSlotDescriptor& right)
+StreamControlOutcome rejectRequest(
+    const StartupSession& session,
+    StreamControlResponse& response,
+    StreamRequestValidationFailure failure)
 {
-    return left.mapName == right.mapName
-        && left.mutexName == right.mutexName
-        && left.protocolVersion == right.protocolVersion
-        && left.maxWidth == right.maxWidth
-        && left.maxHeight == right.maxHeight
-        && left.maxPayloadBytes == right.maxPayloadBytes;
+    response.setOutcome(
+        session,
+        StreamControlOutcome::Rejected,
+        StreamControlPhase::RequestValidation,
+        streamRequestValidationFailureCode(failure),
+        true);
+    return StreamControlOutcome::Rejected;
 }
 
 }
-
-namespace ArgusWorker
-{
 
 StreamControlOutcome executeStreamControl(
     const QString& startupEndpoint,
@@ -47,51 +50,37 @@ StreamControlOutcome executeStreamControl(
         request.clear();
     });
     response.clear();
-    if (startupEndpoint != request.endpoint()
-            || startupDisplayId.isEmpty()
-            || startupDisplayId != request.displayId()
-            || !sameFrameSlot(startupFrameSlot, request.frameSlot())) {
-        response.setOutcome(
-            session,
-            StreamControlOutcome::Rejected,
-            StreamControlPhase::RequestValidation,
-            0,
-            true);
-        return StreamControlOutcome::Rejected;
+    StreamRequestValidationFailure validationFailure =
+        classifyStartupRequest(
+            startupEndpoint,
+            startupDisplayId,
+            startupFrameSlot,
+            request.endpoint(),
+            request.displayId(),
+            request.frameSlot());
+    if (validationFailure != StreamRequestValidationFailure::None) {
+        return rejectRequest(session, response, validationFailure);
     }
     NvAddress address;
     const QSslCertificate serverCertificate(
         request.serverCertificate());
-    if (!parsePairingEndpoint(request.endpoint(), address)
-            || serverCertificate.isNull()) {
-        response.setOutcome(
-            session,
-            StreamControlOutcome::Rejected,
-            StreamControlPhase::RequestValidation,
-            0,
-            true);
-        return StreamControlOutcome::Rejected;
+    validationFailure = classifyEndpointAndCertificate(
+        parsePairingEndpoint(request.endpoint(), address),
+        !serverCertificate.isNull());
+    if (validationFailure != StreamRequestValidationFailure::None) {
+        return rejectRequest(session, response, validationFailure);
     }
 
     DecodedFrameSink sink;
-    if (sink.open(request.frameSlot(), session)
-            != FrameSlotWriterStatus::Opened) {
-        response.setOutcome(
-            session,
-            StreamControlOutcome::Rejected,
-            StreamControlPhase::RequestValidation,
-            0,
-            true);
-        return StreamControlOutcome::Rejected;
+    validationFailure = classifyFrameSlotOpen(
+        sink.open(request.frameSlot(), session));
+    if (validationFailure != StreamRequestValidationFailure::None) {
+        return rejectRequest(session, response, validationFailure);
     }
-    if (!installDecodedFrameSink(&sink)) {
-        response.setOutcome(
-            session,
-            StreamControlOutcome::Rejected,
-            StreamControlPhase::RequestValidation,
-            0,
-            true);
-        return StreamControlOutcome::Rejected;
+    validationFailure = classifyFrameSinkInstall(
+        installDecodedFrameSink(&sink));
+    if (validationFailure != StreamRequestValidationFailure::None) {
+        return rejectRequest(session, response, validationFailure);
     }
     const auto sinkCleanup = qScopeGuard([&sink]() {
         uninstallDecodedFrameSink(&sink);

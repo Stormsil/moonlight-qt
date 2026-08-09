@@ -15,6 +15,7 @@ SOURCES += \
     ../../app/argus/frameslotwriter.cpp \
     ../../app/argus/pairingendpoint.cpp \
     ../../app/argus/pairingidentitypackage.cpp \
+    ../../app/argus/streamrequestvalidation.cpp \
     ../../app/argus/startupchannel.cpp \
     ../../app/argus/workerbootstrap.cpp \
     ../../app/backend/identitymanager.cpp \
@@ -24,6 +25,7 @@ HEADERS += \
     ../../app/argus/frameslotwriter.h \
     ../../app/argus/pairingidentitypackage.h \
     ../../app/argus/pairingendpoint.h \
+    ../../app/argus/streamrequestvalidation.h \
     ../../app/argus/startupchannel.h \
     ../../app/argus/workerbootstrap.h \
     ../../app/backend/identitymanager.h

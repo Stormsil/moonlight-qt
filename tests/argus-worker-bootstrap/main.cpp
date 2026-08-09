@@ -4,6 +4,7 @@
 #include "argus/pairingendpoint.h"
 #include "argus/startupchannel.h"
 #include "argus/pairingidentitypackage.h"
+#include "argus/streamrequestvalidation.h"
 #include "backend/identitymanager.h"
 #include "backend/nvaddress.h"
 
@@ -58,6 +59,126 @@ bool selectsWorker(std::initializer_list<const char*> arguments)
     return ArgusWorker::isRequested(
         static_cast<int>(argv.size()),
         argv.data());
+}
+
+void checkStreamRequestValidationFailures()
+{
+    using Failure = ArgusWorker::StreamRequestValidationFailure;
+    using ArgusWorker::streamRequestValidationFailureCode;
+
+    const ArgusWorker::StartupFrameSlotDescriptor slot{
+        QStringLiteral("Local\\Argus.Stream.Frame.test"),
+        QStringLiteral("Local\\Argus.Stream.FrameLock.test"),
+        1,
+        1920,
+        1080,
+        1920 * 1080 * 4};
+    ArgusWorker::StartupFrameSlotDescriptor differentSlot = slot;
+    differentSlot.maxPayloadBytes--;
+
+    const std::vector<std::pair<Failure, qint32>> expected{
+        {Failure::InputIsolationUnavailable, 1001},
+        {Failure::StartupEndpointMismatch, 1002},
+        {Failure::StartupDisplayMissing, 1003},
+        {Failure::StartupDisplayMismatch, 1004},
+        {Failure::StartupFrameSlotMismatch, 1005},
+        {Failure::EndpointInvalid, 1006},
+        {Failure::ServerCertificateInvalid, 1007},
+        {Failure::FrameSlotOpenFailed, 1008},
+        {Failure::FrameSinkInstallFailed, 1009},
+    };
+    std::vector<qint32> codes;
+    for (const auto& entry : expected) {
+        const qint32 code = streamRequestValidationFailureCode(entry.first);
+        check(code == entry.second,
+              "RequestValidation failure code changed");
+        check(code > 0 && code <= 4096,
+              "RequestValidation failure code must remain bounded");
+        check(ArgusWorker::isKnownStreamRequestValidationFailureCode(code),
+              "Declared RequestValidation failure code must be known");
+        codes.push_back(code);
+    }
+    std::sort(codes.begin(), codes.end());
+    check(std::adjacent_find(codes.cbegin(), codes.cend()) == codes.cend(),
+          "RequestValidation failure codes must be unique");
+    check(!ArgusWorker::isKnownStreamRequestValidationFailureCode(0)
+              && !ArgusWorker::isKnownStreamRequestValidationFailureCode(1000)
+              && !ArgusWorker::isKnownStreamRequestValidationFailureCode(1010),
+          "Unknown RequestValidation failure codes must fail closed");
+
+    check(ArgusWorker::classifyInputIsolation(true) == Failure::None,
+          "Supported input isolation must preserve request processing");
+    check(ArgusWorker::classifyStartupRequest(
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY"),
+              slot,
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY"),
+              slot)
+              == Failure::None,
+          "Matching startup request must preserve request processing");
+    check(ArgusWorker::classifyEndpointAndCertificate(true, true)
+              == Failure::None,
+          "Valid endpoint and certificate must preserve request processing");
+    check(ArgusWorker::classifyFrameSlotOpen(
+              ArgusWorker::FrameSlotWriterStatus::Opened)
+              == Failure::None,
+          "Opened frame slot must preserve request processing");
+    check(ArgusWorker::classifyFrameSinkInstall(true) == Failure::None,
+          "Installed frame sink must preserve request processing");
+
+    check(ArgusWorker::classifyInputIsolation(false)
+              == Failure::InputIsolationUnavailable,
+          "Unavailable input isolation must have a distinct failure");
+    check(ArgusWorker::classifyStartupRequest(
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY"),
+              slot,
+              QStringLiteral("http://request"),
+              QStringLiteral("DISPLAY"),
+              slot)
+              == Failure::StartupEndpointMismatch,
+          "Startup endpoint mismatch must have a distinct failure");
+    check(ArgusWorker::classifyStartupRequest(
+              QStringLiteral("http://startup"),
+              QString(),
+              slot,
+              QStringLiteral("http://startup"),
+              QString(),
+              slot)
+              == Failure::StartupDisplayMissing,
+          "Missing startup display must have a distinct failure");
+    check(ArgusWorker::classifyStartupRequest(
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY-A"),
+              slot,
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY-B"),
+              slot)
+              == Failure::StartupDisplayMismatch,
+          "Startup display mismatch must have a distinct failure");
+    check(ArgusWorker::classifyStartupRequest(
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY"),
+              slot,
+              QStringLiteral("http://startup"),
+              QStringLiteral("DISPLAY"),
+              differentSlot)
+              == Failure::StartupFrameSlotMismatch,
+          "Startup frame-slot mismatch must have a distinct failure");
+    check(ArgusWorker::classifyEndpointAndCertificate(false, true)
+              == Failure::EndpointInvalid,
+          "Invalid endpoint must have a distinct failure");
+    check(ArgusWorker::classifyEndpointAndCertificate(true, false)
+              == Failure::ServerCertificateInvalid,
+          "Invalid certificate must have a distinct failure");
+    check(ArgusWorker::classifyFrameSlotOpen(
+              ArgusWorker::FrameSlotWriterStatus::Unavailable)
+              == Failure::FrameSlotOpenFailed,
+          "Frame-slot open failure must have a distinct failure");
+    check(ArgusWorker::classifyFrameSinkInstall(false)
+              == Failure::FrameSinkInstallFailed,
+          "Frame-sink install failure must have a distinct failure");
 }
 
 void appendInt32(QByteArray& bytes, qint32 value)
@@ -1195,7 +1316,8 @@ StreamControlOutcome executeStreamControl(
         request.session(),
         StreamControlOutcome::Rejected,
         StreamControlPhase::RequestValidation,
-        0,
+        streamRequestValidationFailureCode(
+            StreamRequestValidationFailure::EndpointInvalid),
         true);
     request.clear();
     return StreamControlOutcome::Rejected;
@@ -1272,6 +1394,7 @@ int main(int argc, char* argv[])
     checkCodecFailures();
     checkPairingControlCodec();
     checkStreamControlCodec();
+    checkStreamRequestValidationFailures();
 #if defined(ARGUS_COMMON_C_NO_INPUT)
     check(ArgusWorker::isStreamInputIsolationSupported(),
           "Argus patched builds must expose the verified no-input capability");
