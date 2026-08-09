@@ -1,12 +1,12 @@
 {
   "schemaVersion": 5,
   "artifact": "content-addressed Moonlight.exe Argus worker",
-  "artifactSourceCommit": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
-  "artifactSourceTree": "743dcb4c876749f786cbbe83857d90a3b0b27754",
-  "buildLogicCommitAuthority": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
+  "artifactSourceCommit": "a5f5e29232b545dcaa1c6225769db2768150fa4f",
+  "artifactSourceTree": "2d9f30ad00396fe97330d5f93ad56d178df13967",
+  "buildLogicCommitAuthority": "a5f5e29232b545dcaa1c6225769db2768150fa4f",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
-  "sourceBranch": "fix/issue-969-portable-qt-identity",
+  "sourceBranch": "fix/issue-975-request-validation",
   "submodules": [
     "moonlight-common-c/moonlight-common-c@e41355ea01670fd4c830b384009d31dd0339a705",
     "moonlight-common-c/moonlight-common-c/enet@aca87840b57f045a1f7f9299e4b1b9b8e2a5e2f1",
@@ -46,14 +46,14 @@
   "reproducibleBuild": {
     "contractPath": "app/argus/repro/reproducible-worker-v2.json",
     "contractSha256": "F81F81D7F6E38E9FF46A157EC367F9A457D020F5219B0B9A7B8FAD8652AC4217",
-    "twoBuildProofSha256": "264E47797AD2126D39BE1BA301BE5C38990AEC9BC9FA944FDF43053E83A318C1",
+    "twoBuildProofSha256": "15E047DB5CDA1B074BE14D937EF358DCAAC74BE238C944E1AAED563012C3E0E3",
     "buildReceiptSha256": [
-      "FC0627A3D6D2382215DBBE957B83B7BDAA5F87BE3436546589F419CFDD51BDE2",
-      "BAFEF7D2DEAEB84BA648241034CEDB983F88FDE06B6A740154CA8341EF84C873"
+      "40E0821D691088ADAE8E5544D235CF21989C83D024130BF885AE3F56F5CA4571",
+      "7A340A9AB476399AD780796DBFC44758E9C700F5262CCE5790967E603B998DDB"
     ],
     "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
     "verificationScript": "app/argus/repro/Verify-ReproducibleWorker.ps1",
-    "workerSha256": "C0CACE23418F88F8DABD53EB1B4810C68FE10A4C055400D8BA59360B15B92385",
+    "workerSha256": "AB4933F865EA3D58B9A4C7DE9D14AAF31002D6969C66E11EF1FDB39FA93919CE",
     "cleanBuildCount": 2,
     "absoluteRootsDistinct": true,
     "absoluteSourceRootsDistinct": true,
@@ -61,8 +61,8 @@
     "pdbCanonicalArtifact": false,
     "pdbDistributed": false,
     "qtRootIdentitySha256": [
-      "67A6EF37C5A51678F4A35AD87653C8DADC631A3FB806054C012E9BF709393FFE",
-      "09627255A9162F05FEC2EC46E583DBEFECFC95FB772D286B1F21D42BC0B7C8DD"
+      "560DAD1BA3E6F1CE03D4E2408FBEE6A0D29521F149F4BC283A9A97603AD2560C",
+      "D5E23B6E7267714BF3BF1B3EC720384B28759E34FBA8672DE5913ED773808D2B"
     ],
     "rootIdentityRefreshScript": "app/argus/repro/Refresh-QtRootIdentityEvidence.ps1"
   },
