@@ -3,7 +3,7 @@
   "artifact": "content-addressed Moonlight.exe Argus worker",
   "artifactSourceCommit": "a5f5e29232b545dcaa1c6225769db2768150fa4f",
   "artifactSourceTree": "2d9f30ad00396fe97330d5f93ad56d178df13967",
-  "buildLogicCommitAuthority": "a5f5e29232b545dcaa1c6225769db2768150fa4f",
+  "buildLogicCommitAuthority": "90848bf1bace9b14f9de86d7f4f9881060518676",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
   "sourceBranch": "fix/issue-975-request-validation",

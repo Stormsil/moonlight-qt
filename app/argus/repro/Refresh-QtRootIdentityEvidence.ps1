@@ -16,6 +16,9 @@ param(
     [Parameter(Mandatory = $true)] [string] $PackageObjectContractPath,
     [Parameter(Mandatory = $true)] [string] $PackageObjectReceiptPath,
     [Parameter(Mandatory = $true)] [string] $IdentityContractPath,
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9a-f]{40}$')]
+    [string] $BuildLogicCommitAuthority,
     [Parameter(Mandatory = $true)] [string] $BotRoot
 )
 
@@ -256,7 +259,7 @@ Set-JsonProperty $correspondingSource 'artifactSourceCommit' `
 Set-JsonProperty $correspondingSource 'artifactSourceTree' `
     $proof.source.sourceTree
 Set-JsonProperty $correspondingSource 'buildLogicCommitAuthority' `
-    $proof.source.forkCommit
+    $BuildLogicCommitAuthority
 Set-JsonProperty $correspondingSource.reproducibleBuild `
     'qtRootIdentitySha256' @($rootIdentities[0], $rootIdentities[1])
 Set-JsonProperty $correspondingSource.reproducibleBuild `
