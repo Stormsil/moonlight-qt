@@ -3,7 +3,7 @@
   "artifact": "content-addressed Moonlight.exe Argus worker",
   "artifactSourceCommit": "456b5b9993726e9b06b492b743fe8e8dadd81384",
   "artifactSourceTree": "095031b135e6f599bd87db4414148f337e08cb2c",
-  "buildLogicCommitAuthority": "f94e76989e6e484164a0bf02b1498defd6271872",
+  "buildLogicCommitAuthority": "1e238b8f838c1de3578733af50728334934dadd5",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
   "sourceBranch": "fix/issue-979-renderer-free-worker",
@@ -46,10 +46,10 @@
   "reproducibleBuild": {
     "contractPath": "app/argus/repro/reproducible-worker-v2.json",
     "contractSha256": "F81F81D7F6E38E9FF46A157EC367F9A457D020F5219B0B9A7B8FAD8652AC4217",
-    "twoBuildProofSha256": "BD31118BFFC81587899CF4CCC3FA684DCA2C2DDEDC5185F46300854709E96F88",
+    "twoBuildProofSha256": "21C195C938942CD012E181F30DB7E3C53DE86CA317E5DA9C127F2073BEDA9946",
     "buildReceiptSha256": [
-      "D0CE3B9FF5883452EFD803EC070F53C41F39938BA3589ECB544A16D7F67E4D87",
-      "E69A00D348B22402FD45A31F2619EE78053036C51B86E49D4F8ADC63081CBE24"
+      "65D7986D1FF4CA46571621B9C23C53F99190108E0E223FF646E71A326C14791B",
+      "9D03AD449540B85E02538B3B186F5CDF1C98D2DD6571F91877137412A8616BD6"
     ],
     "buildScript": "app/argus/repro/Build-ReproducibleWorker.ps1",
     "verificationScript": "app/argus/repro/Verify-ReproducibleWorker.ps1",
