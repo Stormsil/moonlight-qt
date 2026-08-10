@@ -3,7 +3,7 @@
   "artifact": "content-addressed Moonlight.exe Argus worker",
   "artifactSourceCommit": "7d5c847df669e83bf7ca1213dc858d89c15cd680",
   "artifactSourceTree": "e5cbe257756d28c711ac7907347734064cf61fda",
-  "buildLogicCommitAuthority": "7d5c847df669e83bf7ca1213dc858d89c15cd680",
+  "buildLogicCommitAuthority": "d710c8aa8525e41c90509875d96d34e66323c582",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
   "sourceBranch": "feat/issue-991-multi-frame-worker",

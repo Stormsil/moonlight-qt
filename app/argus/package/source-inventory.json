@@ -24,7 +24,7 @@
     "rootIdentityAlgorithm": "sha256-uppercase-normalized-absolute-path-utf8-v1"
   },
   "capabilities": {
-    "argusWorkerProtocol": 1,
+    "argusWorkerProtocol": 3,
     "noInputConnection": {
       "commonCBaseCommit": "e41355ea01670fd4c830b384009d31dd0339a705",
       "patchPath": "app/argus/common-c/no-input-v1.patch",
