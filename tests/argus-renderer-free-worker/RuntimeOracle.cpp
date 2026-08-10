@@ -280,7 +280,7 @@ int run(int argc, char* argv[])
                     "Run-RendererFreeWorkerOracle.ps1")
             && runnerWorkingTreeSha256.size() == 64
             && runnerGitBlobSha256.size() == 64
-            && runnerCommit == sourceCommit,
+            && runnerCommit.size() == 40,
         "exact artifact and oracle authority arguments are required");
 
     ArgusWorker::DecodedFrameSink invalidSink;

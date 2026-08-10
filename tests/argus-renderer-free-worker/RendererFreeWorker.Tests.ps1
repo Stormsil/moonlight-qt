@@ -70,6 +70,14 @@ if (-not $oracleRunnerSource.Contains(
         [System.StringComparison]::Ordinal)) {
     throw 'Renderer-free oracle does not pin and restore the software SDL renderer.'
 }
+if (-not $oracleRunnerSource.Contains(
+        '[string] $ArtifactSourceCommit',
+        [System.StringComparison]::Ordinal) -or
+    -not $oracleRunnerSource.Contains(
+        '$ArtifactSourceCommit,',
+        [System.StringComparison]::Ordinal)) {
+    throw 'Renderer-free oracle does not bind artifact and runner commits separately.'
+}
 
 if ($workerRun.Contains(
         'SDL_CreateWindow',

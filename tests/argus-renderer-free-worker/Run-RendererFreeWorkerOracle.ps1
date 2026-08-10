@@ -10,6 +10,8 @@ param(
     [Parameter(Mandatory)]
     [string] $SourceRoot,
     [Parameter(Mandatory)]
+    [string] $ArtifactSourceCommit,
+    [Parameter(Mandatory)]
     [string] $ExpectedSourceCommit
 )
 
@@ -71,13 +73,22 @@ if (Test-Path -LiteralPath $output) {
 }
 
 $head = (git -C $source rev-parse HEAD).Trim()
-$tree = (git -C $source rev-parse 'HEAD^{tree}').Trim()
 $status = git -C $source status --porcelain=v1 --untracked-files=all
 $sourceInvalid = $LASTEXITCODE -ne 0 `
     -or $head -ne $ExpectedSourceCommit `
     -or -not [string]::IsNullOrWhiteSpace($status)
 if ($sourceInvalid) {
-    throw 'Oracle source must be clean at the exact artifact source commit.'
+    throw 'Oracle source must be clean at the exact runner source commit.'
+}
+$artifactAncestor = git -C $source merge-base --is-ancestor `
+    $ArtifactSourceCommit $head
+if ($LASTEXITCODE -ne 0) {
+    throw 'Artifact source commit must be an ancestor of the oracle runner.'
+}
+$tree = (git -C $source rev-parse "$ArtifactSourceCommit`^{tree}").Trim()
+if ($ArtifactSourceCommit -notmatch '^[0-9a-f]{40}$' -or
+    $tree -notmatch '^[0-9a-f]{40}$') {
+    throw 'Artifact source authority is invalid.'
 }
 
 $artifactSha256 = Get-Sha256 $worker
@@ -102,7 +113,7 @@ try {
         $output,
         $artifactSha256,
         [string]$artifactLength,
-        $head,
+        $ArtifactSourceCommit,
         $tree,
         $oracleSha256,
         [string]$oracleLength,
@@ -136,7 +147,7 @@ $bindingChecks = @(
     $receipt.schemaVersion -eq 3
     $receipt.authority.artifact.sha256 -eq $artifactSha256
     $receipt.authority.artifact.length -eq $artifactLength
-    $receipt.authority.artifact.sourceCommit -eq $head
+    $receipt.authority.artifact.sourceCommit -eq $ArtifactSourceCommit
     $receipt.authority.artifact.sourceTree -eq $tree
     $receipt.authority.oracle.executableSha256 -eq $oracleSha256
     $receipt.authority.oracle.executableLength -eq $oracleLength
