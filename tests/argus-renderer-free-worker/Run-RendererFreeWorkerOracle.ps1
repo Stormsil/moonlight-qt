@@ -92,9 +92,11 @@ $runnerGitBlobSha256 = Get-GitBlobSha256 `
 
 $priorPath = $env:PATH
 $priorQtPluginPath = $env:QT_PLUGIN_PATH
+$priorSdlRenderDriver = $env:SDL_RENDER_DRIVER
 try {
     $env:PATH = "$runtime;C:\Windows\System32;C:\Windows"
     $env:QT_PLUGIN_PATH = $runtime
+    $env:SDL_RENDER_DRIVER = 'software'
     $arguments = @(
         '--argus-renderer-free-oracle',
         $output,
@@ -122,6 +124,7 @@ try {
 finally {
     $env:PATH = $priorPath
     $env:QT_PLUGIN_PATH = $priorQtPluginPath
+    $env:SDL_RENDER_DRIVER = $priorSdlRenderDriver
 }
 
 if (-not (Test-Path -LiteralPath $output)) {

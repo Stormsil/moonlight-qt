@@ -58,6 +58,18 @@ $streamClientSource = Get-Content -LiteralPath $streamClientPath -Raw
 $streamControl = Get-CppFunctionBody `
     -Source $streamClientSource `
     -Signature 'StreamControlOutcome executeStreamControl('
+$oracleRunnerPath = Join-Path $RepositoryRoot `
+    'tests\argus-renderer-free-worker\Run-RendererFreeWorkerOracle.ps1'
+$oracleRunnerSource = Get-Content -LiteralPath $oracleRunnerPath -Raw
+
+if (-not $oracleRunnerSource.Contains(
+        '$env:SDL_RENDER_DRIVER = ''software''',
+        [System.StringComparison]::Ordinal) -or
+    -not $oracleRunnerSource.Contains(
+        '$env:SDL_RENDER_DRIVER = $priorSdlRenderDriver',
+        [System.StringComparison]::Ordinal)) {
+    throw 'Renderer-free oracle does not pin and restore the software SDL renderer.'
+}
 
 if ($workerRun.Contains(
         'SDL_CreateWindow',
