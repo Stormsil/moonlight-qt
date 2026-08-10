@@ -1,4 +1,8 @@
 #include <QGuiApplication>
+
+#ifdef ARGUS_RENDERER_FREE_ORACLE
+#include "RuntimeOracle.h"
+#endif
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -422,6 +426,12 @@ void configureSignalHandlers()
 int main(int argc, char *argv[])
 {
     SDL_SetMainReady();
+
+#ifdef ARGUS_RENDERER_FREE_ORACLE
+    if (ArgusRendererFreeOracle::isRequested(argc, argv)) {
+        return ArgusRendererFreeOracle::run(argc, argv);
+    }
+#endif
 
     if (ArgusWorker::isRequested(argc, argv)) {
         return ArgusWorker::run(argc, argv);

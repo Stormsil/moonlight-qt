@@ -18,6 +18,7 @@ public:
     FFmpegVideoDecoder(bool testOnly);
     virtual ~FFmpegVideoDecoder() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
+    bool initializeRendererFree(PDECODER_PARAMETERS params);
     virtual bool isHardwareAccelerated() override;
     virtual bool isAlwaysFullScreen() override;
     virtual bool isHdrSupported() override;
@@ -129,6 +130,7 @@ private:
     int m_VideoFormat;
     bool m_NeedsSpsFixup;
     bool m_TestOnly;
+    bool m_RendererFree;
     TestMode m_CurrentTestMode;
     SDL_Thread* m_DecoderThread;
     SDL_atomic_t m_DecoderThreadShouldQuit;

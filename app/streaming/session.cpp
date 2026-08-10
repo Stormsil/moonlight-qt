@@ -392,6 +392,48 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     return false;
 }
 
+bool Session::chooseArgusDecoder(
+    int videoFormat,
+    int width,
+    int height,
+    int frameRate,
+    bool testOnly,
+    IVideoDecoder*& chosenDecoder)
+{
+    DECODER_PARAMETERS params = {};
+    params.width = width;
+    params.height = height;
+    params.frameRate = frameRate;
+    params.videoFormat = videoFormat;
+    params.window = nullptr;
+    params.enableVsync = false;
+    params.enableFramePacing = false;
+    params.testOnly = testOnly;
+    params.vds = StreamingPreferences::VDS_FORCE_SOFTWARE;
+    params.renderer = StreamingPreferences::RS_AUTO;
+
+#ifdef HAVE_FFMPEG
+    chosenDecoder = new FFmpegVideoDecoder(testOnly);
+    if (static_cast<FFmpegVideoDecoder*>(chosenDecoder)
+            ->initializeRendererFree(&params)) {
+        SDL_LogInfo(
+            SDL_LOG_CATEGORY_APPLICATION,
+            "FFmpeg renderer-free video decoder chosen");
+        return true;
+    }
+
+    delete chosenDecoder;
+    chosenDecoder = nullptr;
+#else
+    Q_UNUSED(params);
+#endif
+
+    SDL_LogError(
+        SDL_LOG_CATEGORY_APPLICATION,
+        "Unable to load renderer-free FFmpeg decoder");
+    return false;
+}
+
 int Session::drSetup(int videoFormat, int width, int height, int frameRate, void *, int)
 {
     s_ActiveSession->m_ActiveVideoFormat = videoFormat;
@@ -613,6 +655,30 @@ bool Session::populateDecoderProperties(SDL_Window* window)
 
     delete decoder;
 
+    return true;
+}
+
+bool Session::populateArgusDecoderProperties()
+{
+    IVideoDecoder* decoder = nullptr;
+    if (!chooseArgusDecoder(
+            m_SupportedVideoFormats.first(),
+            m_StreamConfig.width,
+            m_StreamConfig.height,
+            m_StreamConfig.fps,
+            true,
+            decoder)) {
+        return false;
+    }
+
+    m_VideoCallbacks.capabilities = decoder->getDecoderCapabilities();
+    m_VideoCallbacks.submitDecodeUnit =
+        (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER)
+        ? nullptr
+        : drSubmitDecodeUnit;
+    m_StreamConfig.colorSpace = decoder->getDecoderColorspace();
+    m_StreamConfig.colorRange = decoder->getDecoderColorRange();
+    delete decoder;
     return true;
 }
 
@@ -1025,7 +1091,48 @@ bool Session::initialize(QQuickWindow* qtWindow)
 bool Session::initializeArgusHeadless()
 {
     m_ArgusHeadless = true;
-    return initialize(nullptr);
+
+    LiInitializeStreamConfiguration(&m_StreamConfig);
+    m_StreamConfig.width = m_Preferences->width;
+    m_StreamConfig.height = m_Preferences->height;
+    m_StreamConfig.fps = m_Preferences->fps;
+    m_StreamConfig.bitrate = m_Preferences->bitrateKbps;
+
+#ifndef STEAM_LINK
+    if (StreamUtils::hasFastAes() && SDL_GetCPUCount() > 2) {
+        m_StreamConfig.encryptionFlags = ENCFLG_ALL;
+    }
+    else {
+        m_StreamConfig.encryptionFlags = ENCFLG_AUDIO;
+    }
+#endif
+
+    RAND_bytes(
+        reinterpret_cast<unsigned char*>(
+            m_StreamConfig.remoteInputAesKey),
+        sizeof(m_StreamConfig.remoteInputAesKey));
+    RAND_bytes(
+        reinterpret_cast<unsigned char*>(
+            m_StreamConfig.remoteInputAesIv),
+        4);
+
+    m_StreamConfig.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
+    LiInitializeAudioCallbacks(&m_AudioCallbacks);
+    m_AudioCallbacks.init = argusAudioInit;
+    m_AudioCallbacks.cleanup = argusAudioCleanup;
+    m_AudioCallbacks.decodeAndPlaySample = argusAudioDiscard;
+    m_AudioCallbacks.capabilities = 0;
+
+    // createArgusWorker() currently pins the production worker profile to
+    // H.264 software decoding. The renderer-free FFmpeg path itself accepts
+    // every negotiated format that has a software decoder and swscale input.
+    m_SupportedVideoFormats.clear();
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264);
+    m_StreamConfig.supportedVideoFormats = m_SupportedVideoFormats.first();
+
+    LiInitializeVideoCallbacks(&m_VideoCallbacks);
+    m_VideoCallbacks.setup = drSetup;
+    return populateArgusDecoderProperties();
 }
 
 int Session::argusFailureCode() const
@@ -1049,28 +1156,14 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
     if (!startConnectionAsync()) {
         s_ActiveSession = nullptr;
         s_ActiveSessionSemaphore.release();
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return outcome;
     }
 
-    m_Window = SDL_CreateWindow(
-        "Argus Stream Worker",
-        SDL_WINDOWPOS_UNDEFINED,
-        SDL_WINDOWPOS_UNDEFINED,
-        qMin(m_StreamConfig.width, 64),
-        qMin(m_StreamConfig.height, 64),
-        SDL_WINDOW_HIDDEN);
-    if (m_Window != nullptr
-            && chooseDecoder(
-                StreamingPreferences::VDS_FORCE_SOFTWARE,
-                StreamingPreferences::RS_AUTO,
-                m_Window,
+    if (chooseArgusDecoder(
                 m_ActiveVideoFormat,
                 m_ActiveVideoWidth,
                 m_ActiveVideoHeight,
                 m_ActiveVideoFrameRate,
-                false,
-                false,
                 false,
                 m_VideoDecoder)) {
         LiRequestIdrFrame();
@@ -1104,11 +1197,6 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
     m_VideoDecoder = nullptr;
     SDL_UnlockMutex(m_DecoderLock);
     LiStopConnection();
-    if (m_Window != nullptr) {
-        SDL_DestroyWindow(m_Window);
-        m_Window = nullptr;
-    }
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
     s_ActiveSession = nullptr;
     s_ActiveSessionSemaphore.release();
     return outcome;

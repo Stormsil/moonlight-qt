@@ -215,6 +215,19 @@ SOURCES += \
     backend/systemproperties.cpp \
     wm.cpp
 
+win32:contains(CONFIG, argus_renderer_free_oracle) {
+    DEFINES += ARGUS_RENDERER_FREE_ORACLE=1
+    ARGUS_RENDERER_FREE_ORACLE_DIR = $$clean_path($$PWD/../tests/argus-renderer-free-worker)
+    INCLUDEPATH += $$ARGUS_RENDERER_FREE_ORACLE_DIR
+    QMAKE_CXXFLAGS += /FI$${ARGUS_RENDERER_FREE_ORACLE_DIR}/RendererConstructionHooks.h
+    SOURCES += \
+        $$ARGUS_RENDERER_FREE_ORACLE_DIR/RendererConstructionHooks.cpp \
+        $$ARGUS_RENDERER_FREE_ORACLE_DIR/RuntimeOracle.cpp
+    HEADERS += \
+        $$ARGUS_RENDERER_FREE_ORACLE_DIR/RendererConstructionHooks.h \
+        $$ARGUS_RENDERER_FREE_ORACLE_DIR/RuntimeOracle.h
+}
+
 HEADERS += \
     argus/decodedframesink.h \
     argus/frameslotwriter.h \

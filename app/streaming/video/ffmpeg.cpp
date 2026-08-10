@@ -4,11 +4,16 @@
 #include "utils.h"
 #include "streaming/session.h"
 
+#ifdef ARGUS_RENDERER_FREE_ORACLE
+#include "RuntimeOracle.h"
+#endif
+
 #include <h264_stream.h>
 
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/pixdesc.h>
+#include <libswscale/swscale.h>
 }
 
 #include "ffmpeg-renderers/sdlvid.h"
@@ -62,28 +67,37 @@ extern "C" {
 
 bool FFmpegVideoDecoder::isHardwareAccelerated()
 {
-    return m_HwDecodeCfg != nullptr ||
-            (getAVCodecCapabilities(m_VideoDecoderCtx->codec) & AV_CODEC_CAP_HARDWARE) != 0;
+    return !m_RendererFree
+        && (m_HwDecodeCfg != nullptr
+            || (getAVCodecCapabilities(m_VideoDecoderCtx->codec)
+                & AV_CODEC_CAP_HARDWARE) != 0);
 }
 
 bool FFmpegVideoDecoder::isAlwaysFullScreen()
 {
-    return m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_FULLSCREEN_ONLY;
+    return !m_RendererFree
+        && (m_FrontendRenderer->getRendererAttributes()
+            & RENDERER_ATTRIBUTE_FULLSCREEN_ONLY);
 }
 
 bool FFmpegVideoDecoder::isHdrSupported()
 {
-    return m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_HDR_SUPPORT;
+    return !m_RendererFree
+        && (m_FrontendRenderer->getRendererAttributes()
+            & RENDERER_ATTRIBUTE_HDR_SUPPORT);
 }
 
 void FFmpegVideoDecoder::setHdrMode(bool enabled)
 {
-    m_FrontendRenderer->setHdrMode(enabled);
+    if (!m_RendererFree) {
+        m_FrontendRenderer->setHdrMode(enabled);
+    }
 }
 
 bool FFmpegVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
 {
-    return m_FrontendRenderer->notifyWindowChanged(info);
+    return !m_RendererFree
+        && m_FrontendRenderer->notifyWindowChanged(info);
 }
 
 int FFmpegVideoDecoder::getDecoderCapabilities()
@@ -96,8 +110,10 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
                     capabilities);
     }
     else {
-        // Start with the backend renderer's capabilities
-        capabilities = m_BackendRenderer->getDecoderCapabilities();
+        // Renderer-free Argus decoding has no backend renderer capabilities.
+        capabilities = m_RendererFree
+            ? 0
+            : m_BackendRenderer->getDecoderCapabilities();
 
         if (!isHardwareAccelerated()) {
             // Slice up to 4 times for parallel CPU decoding, once slice per core
@@ -158,17 +174,23 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
 
 int FFmpegVideoDecoder::getDecoderColorspace()
 {
-    return m_FrontendRenderer->getDecoderColorspace();
+    return m_RendererFree
+        ? COLORSPACE_REC_601
+        : m_FrontendRenderer->getDecoderColorspace();
 }
 
 int FFmpegVideoDecoder::getDecoderColorRange()
 {
-    return m_FrontendRenderer->getDecoderColorRange();
+    return m_RendererFree
+        ? COLOR_RANGE_LIMITED
+        : m_FrontendRenderer->getDecoderColorRange();
 }
 
 QSize FFmpegVideoDecoder::getDecoderMaxResolution()
 {
-    if (m_BackendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_1080P_MAX) {
+    if (!m_RendererFree
+            && (m_BackendRenderer->getRendererAttributes()
+                & RENDERER_ATTRIBUTE_1080P_MAX)) {
         return QSize(1920, 1080);
     }
     else {
@@ -184,6 +206,19 @@ enum AVPixelFormat FFmpegVideoDecoder::ffGetFormat(AVCodecContext* context,
     const AVPixelFormat *p;
     AVPixelFormat desiredFmt;
 
+    if (decoder->m_RendererFree) {
+        for (p = pixFmts; *p != AV_PIX_FMT_NONE; p++) {
+            const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(*p);
+            if (descriptor != nullptr
+                    && (descriptor->flags & AV_PIX_FMT_FLAG_HWACCEL) == 0
+                    && sws_isSupportedInput(*p)) {
+                return *p;
+            }
+        }
+
+        return AV_PIX_FMT_NONE;
+    }
+
     if (decoder->m_HwDecodeCfg) {
         desiredFmt = decoder->m_HwDecodeCfg->pix_fmt;
     }
@@ -191,7 +226,8 @@ enum AVPixelFormat FFmpegVideoDecoder::ffGetFormat(AVCodecContext* context,
         desiredFmt = decoder->m_RequiredPixelFormat;
     }
     else {
-        desiredFmt = decoder->m_FrontendRenderer->getPreferredPixelFormat(decoder->m_VideoFormat);
+        desiredFmt = decoder->m_FrontendRenderer->getPreferredPixelFormat(
+            decoder->m_VideoFormat);
     }
 
     for (p = pixFmts; *p != AV_PIX_FMT_NONE; p++) {
@@ -199,7 +235,9 @@ enum AVPixelFormat FFmpegVideoDecoder::ffGetFormat(AVCodecContext* context,
         // format (if not using hardware decoding). It's crucial
         // to override the default get_format() which will try
         // to gracefully fall back to software decode and break us.
-        if (*p == desiredFmt && decoder->m_BackendRenderer->prepareDecoderContextInGetFormat(context, *p)) {
+        if (*p == desiredFmt
+                && decoder->m_BackendRenderer
+                    ->prepareDecoderContextInGetFormat(context, *p)) {
             return *p;
         }
     }
@@ -236,6 +274,7 @@ FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
       m_VideoFormat(0),
       m_NeedsSpsFixup(false),
       m_TestOnly(testOnly),
+      m_RendererFree(false),
       m_CurrentTestMode(TestMode::TestFrameOnly),
       m_DecoderThread(nullptr)
 {
@@ -289,7 +328,8 @@ void FFmpegVideoDecoder::reset()
     // need to delete in the renderer destructor.
     avcodec_free_context(&m_VideoDecoderCtx);
 
-    if (m_CurrentTestMode != TestMode::TestFrameOnly) {
+    if (!m_RendererFree
+            && m_CurrentTestMode != TestMode::TestFrameOnly) {
         Session::get()->getOverlayManager().setOverlayRenderer(nullptr);
     }
 
@@ -483,8 +523,10 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     // In test-only mode, we should only see test frames
     SDL_assert(!m_TestOnly || testMode != TestMode::NoTesting);
 
-    // Create the frontend renderer based on the capabilities of the backend renderer
-    if (!createFrontendRenderer(params, useAlternateFrontend)) {
+    // Interactive decoding retains the renderer selection path. Explicit
+    // Argus worker decoding publishes directly to its installed frame sink.
+    if (!m_RendererFree
+            && !createFrontendRenderer(params, useAlternateFrontend)) {
         return false;
     }
 
@@ -496,7 +538,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     m_CurrentTestMode = testMode;
 
     // Don't bother initializing Pacer if we're not actually going to render
-    if (testMode != TestMode::TestFrameOnly) {
+    if (!m_RendererFree && testMode != TestMode::TestFrameOnly) {
         m_Pacer = new Pacer(m_FrontendRenderer, &m_ActiveWndVideoStats);
         if (!m_Pacer->initialize(params->window, params->frameRate,
                                  params->enableFramePacing || (params->enableVsync && (m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_FORCE_PACING)))) {
@@ -545,7 +587,9 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     m_VideoDecoderCtx->pkt_timebase.den = 90000;
 
     // Allocate enough extra frames for Pacer to avoid stalling the decoder
-    m_VideoDecoderCtx->extra_hw_frames = PACER_MAX_OUTSTANDING_FRAMES;
+    m_VideoDecoderCtx->extra_hw_frames = m_RendererFree
+        ? 0
+        : PACER_MAX_OUTSTANDING_FRAMES;
 
     // For non-hwaccel decoders, set the pix_fmt to hint to the decoder which
     // format should be used. This is necessary for certain decoders like the
@@ -554,14 +598,21 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     // FFmpeg 7.0-8.0 to incorrectly believe ff_get_format() was called.
     // See #1511.
     if (m_HwDecodeCfg == nullptr) {
-        m_VideoDecoderCtx->pix_fmt = (requiredFormat != AV_PIX_FMT_NONE) ?
-            requiredFormat : m_FrontendRenderer->getPreferredPixelFormat(params->videoFormat);
+        m_VideoDecoderCtx->pix_fmt = (requiredFormat != AV_PIX_FMT_NONE)
+            ? requiredFormat
+            : (m_RendererFree
+                ? AV_PIX_FMT_NONE
+                : m_FrontendRenderer->getPreferredPixelFormat(
+                    params->videoFormat));
     }
 
     AVDictionary* options = nullptr;
 
     // Allow the backend renderer to attach data to this decoder
-    if (!m_BackendRenderer->prepareDecoderContext(m_VideoDecoderCtx, &options)) {
+    if (!m_RendererFree
+            && !m_BackendRenderer->prepareDecoderContext(
+                m_VideoDecoderCtx,
+                &options)) {
         return false;
     }
 
@@ -695,12 +746,19 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
         }
 
         // Allow the renderer to do any validation it wants on this frame
-        if (!m_FrontendRenderer->testRenderFrame(frame)) {
+        if (!m_RendererFree
+                && !m_FrontendRenderer->testRenderFrame(frame)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Test decode failed (testRenderFrame)");
             av_frame_free(&frame);
             return false;
         }
+
+#ifdef ARGUS_RENDERER_FREE_ORACLE
+        if (m_RendererFree) {
+            ArgusRendererFreeOracle::publishDecodedProbeFrame(frame);
+        }
+#endif
 
         av_frame_free(&frame);
 
@@ -714,8 +772,10 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     }
 
     if (testMode != TestMode::TestFrameOnly) {
-        if ((params->videoFormat & VIDEO_FORMAT_MASK_H264) &&
-                !(m_BackendRenderer->getDecoderCapabilities() & CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC)) {
+        if ((params->videoFormat & VIDEO_FORMAT_MASK_H264)
+                && (m_RendererFree
+                    || !(m_BackendRenderer->getDecoderCapabilities()
+                        & CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC))) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Using H.264 SPS fixup");
             m_NeedsSpsFixup = true;
@@ -724,11 +784,14 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             m_NeedsSpsFixup = false;
         }
 
-        // Tell overlay manager to use this frontend renderer
-        Session::get()->getOverlayManager().setOverlayRenderer(m_FrontendRenderer);
+        if (!m_RendererFree) {
+            // Tell overlay manager to use this frontend renderer
+            Session::get()->getOverlayManager().setOverlayRenderer(
+                m_FrontendRenderer);
 
-        // Allow the renderer to perform final preparations for rendering
-        m_FrontendRenderer->prepareToRender();
+            // Allow the renderer to perform final preparations for rendering
+            m_FrontendRenderer->prepareToRender();
+        }
 
         // Only create the decoder thread when instantiating the decoder for real. It will use APIs from
         // moonlight-common-c that can only be legally called with an established connection.
@@ -739,7 +802,13 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             return false;
         }
 
-        if (m_FrontendRenderer->getRendererType() != m_BackendRenderer->getRendererType()) {
+        if (m_RendererFree) {
+            SDL_LogInfo(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "Renderer-free FFmpeg decoder chosen for Argus frame sink");
+        }
+        else if (m_FrontendRenderer->getRendererType()
+                != m_BackendRenderer->getRendererType()) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Renderer '%s' with '%s' backend chosen",
                         m_FrontendRenderer->getRendererName(),
@@ -1627,6 +1696,8 @@ bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS para
 
 bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
 {
+    SDL_assert(!m_RendererFree);
+
     // Increase log level until the first frame is decoded
     av_log_set_level(AV_LOG_DEBUG);
 
@@ -1756,6 +1827,55 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                  "Unable to find working decoder for format: %x",
                  params->videoFormat);
+    return false;
+}
+
+bool FFmpegVideoDecoder::initializeRendererFree(
+    PDECODER_PARAMETERS params)
+{
+    if (params == nullptr
+            || params->window != nullptr
+            || params->enableVsync
+            || params->enableFramePacing
+            || params->testOnly != m_TestOnly) {
+        return false;
+    }
+
+    m_RendererFree = true;
+    av_log_set_level(AV_LOG_DEBUG);
+
+    const AVCodec* decoder;
+    void* codecIterator = nullptr;
+    while ((decoder = av_codec_iterate(&codecIterator))) {
+        if (!av_codec_is_decoder(decoder)
+                || !isDecoderMatchForParams(decoder, params)
+                || (getAVCodecCapabilities(decoder)
+                    & AV_CODEC_CAP_HARDWARE) != 0) {
+            continue;
+        }
+
+        if (completeInitialization(
+                decoder,
+                AV_PIX_FMT_NONE,
+                params,
+                m_TestOnly
+                    ? TestMode::TestFrameOnly
+                    : TestMode::TestFrame,
+                false)) {
+            SDL_LogInfo(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "FFmpeg renderer-free software decoder chosen: %s",
+                decoder->name);
+            return true;
+        }
+
+        reset();
+    }
+
+    SDL_LogError(
+        SDL_LOG_CATEGORY_APPLICATION,
+        "Unable to find renderer-free software decoder for format: %x",
+        params->videoFormat);
     return false;
 }
 
@@ -1976,8 +2096,14 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     // already-decoded frame without owning a second decoder.
                     ArgusWorker::publishDecodedFrame(frame);
 
-                    // Queue the frame for rendering (or render now if pacer is disabled)
-                    m_Pacer->submitFrame(frame);
+                    if (m_RendererFree) {
+                        av_frame_free(&frame);
+                    }
+                    else {
+                        // Queue the frame for rendering (or render now if
+                        // pacer is disabled).
+                        m_Pacer->submitFrame(frame);
+                    }
                 }
                 else if (err == AVERROR(EAGAIN)) {
                     VIDEO_FRAME_HANDLE handle;
@@ -2059,7 +2185,9 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     // Flip stats windows roughly every second
     if (LiGetMicroseconds() > m_ActiveWndVideoStats.measurementStartUs + 1000000) {
         // Update overlay stats if it's enabled
-        if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+        if (!m_RendererFree
+                && Session::get()->getOverlayManager()
+                    .isOverlayEnabled(Overlay::OverlayDebug)) {
             VIDEO_STATS lastTwoWndStats = {};
             addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
             addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
@@ -2156,6 +2284,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
 void FFmpegVideoDecoder::renderFrameOnMainThread()
 {
-    m_Pacer->renderOnMainThread();
+    if (!m_RendererFree) {
+        m_Pacer->renderOnMainThread();
+    }
 }
-

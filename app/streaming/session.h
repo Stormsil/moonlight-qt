@@ -166,6 +166,8 @@ private:
 
     bool populateDecoderProperties(SDL_Window* window);
 
+    bool populateArgusDecoderProperties();
+
     IAudioRenderer* createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig);
 
     bool initializeAudioRenderer();
@@ -201,6 +203,11 @@ private:
                        int frameRate, bool enableVsync, bool enableFramePacing,
                        bool testOnly,
                        IVideoDecoder*& chosenDecoder);
+
+    static
+    bool chooseArgusDecoder(int videoFormat, int width, int height,
+                            int frameRate, bool testOnly,
+                            IVideoDecoder*& chosenDecoder);
 
     static
     void clStageStarting(int stage);
