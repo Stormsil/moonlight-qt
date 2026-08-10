@@ -66,6 +66,15 @@ if ($workerInitialization.Contains(
     throw 'Explicit Argus worker delegates to interactive SDL/renderer initialization.'
 }
 
+if (-not $workerRun.Contains(
+        'activeDecodedFrameFailureCode()',
+        [System.StringComparison]::Ordinal) -or
+    -not $workerRun.Contains(
+        'ArgusHeadlessOutcome::SinkFailed',
+        [System.StringComparison]::Ordinal)) {
+    throw 'Explicit Argus worker does not terminate promptly on typed sink publication failure.'
+}
+
 if (-not $interactiveInitialization.Contains(
         'SDL_InitSubSystem(SDL_INIT_VIDEO)',
         [System.StringComparison]::Ordinal) -or

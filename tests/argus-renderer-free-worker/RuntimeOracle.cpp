@@ -31,6 +31,8 @@ namespace
 constexpr int HeaderBytes = 144;
 constexpr int MaxPayloadBytes = 8 * 1024 * 1024;
 std::atomic<bool> publicationArmed { false };
+std::atomic<int> lastProbeStatus {
+    static_cast<int>(ArgusWorker::FrameSlotPublishStatus::NotOpen) };
 
 struct SharedSlotFixture
 {
@@ -144,7 +146,9 @@ bool isRequested(int argc, char* argv[])
 void publishDecodedProbeFrame(AVFrame* frame)
 {
     if (publicationArmed.load(std::memory_order_acquire)) {
-        ArgusWorker::publishDecodedFrame(frame);
+        lastProbeStatus.store(
+            static_cast<int>(ArgusWorker::publishDecodedFrame(frame)),
+            std::memory_order_release);
     }
 }
 
@@ -158,10 +162,60 @@ int run(int argc, char* argv[])
         return condition;
     };
 
-    const QString outputPath = argc == 3
+    const QString outputPath = argc >= 3
         ? QString::fromLocal8Bit(argv[2])
         : QString();
     require(!outputPath.isEmpty(), "output path is required");
+    bool artifactLengthValid = false;
+    bool oracleLengthValid = false;
+    const QString artifactSha256 = argc == 13
+        ? QString::fromLatin1(argv[3])
+        : QString();
+    const qint64 artifactLength = argc == 13
+        ? QString::fromLatin1(argv[4]).toLongLong(&artifactLengthValid)
+        : 0;
+    const QString sourceCommit = argc == 13
+        ? QString::fromLatin1(argv[5])
+        : QString();
+    const QString sourceTree = argc == 13
+        ? QString::fromLatin1(argv[6])
+        : QString();
+    const QString oracleSha256 = argc == 13
+        ? QString::fromLatin1(argv[7])
+        : QString();
+    const qint64 oracleLength = argc == 13
+        ? QString::fromLatin1(argv[8]).toLongLong(&oracleLengthValid)
+        : 0;
+    const QString runnerPath = argc == 13
+        ? QString::fromLocal8Bit(argv[9])
+        : QString();
+    const QString runnerWorkingTreeSha256 = argc == 13
+        ? QString::fromLatin1(argv[10])
+        : QString();
+    const QString runnerGitBlobSha256 = argc == 13
+        ? QString::fromLatin1(argv[11])
+        : QString();
+    const QString runnerCommit = argc == 13
+        ? QString::fromLatin1(argv[12])
+        : QString();
+    require(
+        argc == 13
+            && artifactSha256.size() == 64
+            && artifactLengthValid
+            && artifactLength > 0
+            && sourceCommit.size() == 40
+            && sourceTree.size() == 40
+            && oracleSha256.size() == 64
+            && oracleLengthValid
+            && oracleLength > 0
+            && runnerPath
+                == QStringLiteral(
+                    "tests/argus-renderer-free-worker/"
+                    "Run-RendererFreeWorkerOracle.ps1")
+            && runnerWorkingTreeSha256.size() == 64
+            && runnerGitBlobSha256.size() == 64
+            && runnerCommit == sourceCommit,
+        "exact artifact and oracle authority arguments are required");
 
     ArgusWorker::DecodedFrameSink invalidSink;
     const ArgusWorker::FrameSlotWriterStatus invalidOpenStatus =
@@ -183,6 +237,9 @@ int run(int argc, char* argv[])
     qint32 installFailureCode = 0;
     bool cleanupReinstallSucceeded = false;
     bool decoderInitialized = false;
+    bool failureDecoderInitialized = false;
+    qint32 publicationFailureCode = 0;
+    bool firstFailureLatched = false;
     ArgusWorker::DecodedFrameMetadata publishedMetadata;
 
     if (fixture.view != nullptr) {
@@ -225,6 +282,31 @@ int run(int argc, char* argv[])
             require(decoderInitialized, "renderer-free decoder did not initialize");
             publishedMetadata = ArgusWorker::activeDecodedFrameMetadata();
         }
+
+        std::memset(fixture.view + 56, 0, 16);
+        {
+            FFmpegVideoDecoder decoder(true);
+            publicationArmed.store(true, std::memory_order_release);
+            failureDecoderInitialized =
+                decoder.initializeRendererFree(&params);
+            publicationArmed.store(false, std::memory_order_release);
+        }
+        const auto publicationStatus =
+            static_cast<ArgusWorker::FrameSlotPublishStatus>(
+                lastProbeStatus.load(std::memory_order_acquire));
+        publicationFailureCode =
+            ArgusWorker::frameSlotPublishFailureCode(publicationStatus);
+        require(
+            failureDecoderInitialized
+                && publicationStatus
+                    == ArgusWorker::FrameSlotPublishStatus::StaleSession
+                && publicationFailureCode == 1103,
+            "stale frame publication did not produce typed terminal failure");
+        ArgusWorker::publishDecodedFrame(nullptr);
+        firstFailureLatched =
+            ArgusWorker::activeDecodedFrameFailureCode() == 1103;
+        require(firstFailureLatched,
+                "first frame publication failure was not latched");
     }
 
     const RendererConstructionCounts workerCounts =
@@ -248,6 +330,9 @@ int run(int argc, char* argv[])
     require(
         ArgusWorker::activeDecodedFrameMetadata().frameCount == 0,
         "active sink metadata remained after cleanup");
+    require(
+        ArgusWorker::activeDecodedFrameFailureCode() == 0,
+        "active sink failure remained after cleanup");
     cleanupReinstallSucceeded =
         ArgusWorker::installDecodedFrameSink(&competingSink);
     require(cleanupReinstallSucceeded, "sink cleanup did not release ownership");
@@ -295,7 +380,27 @@ int run(int argc, char* argv[])
         "interactive path did not construct its window and renderer");
 
     QJsonObject receipt {
-        { QStringLiteral("schemaVersion"), 1 },
+        { QStringLiteral("schemaVersion"), 2 },
+        { QStringLiteral("authority"), QJsonObject {
+            { QStringLiteral("artifact"), QJsonObject {
+                { QStringLiteral("sha256"), artifactSha256 },
+                { QStringLiteral("length"), artifactLength },
+                { QStringLiteral("sourceCommit"), sourceCommit },
+                { QStringLiteral("sourceTree"), sourceTree },
+            } },
+            { QStringLiteral("oracle"), QJsonObject {
+                { QStringLiteral("executableSha256"), oracleSha256 },
+                { QStringLiteral("executableLength"), oracleLength },
+                { QStringLiteral("configuration"), QStringLiteral(
+                    "release-x64-argus_renderer_free_oracle") },
+                { QStringLiteral("runnerPath"), runnerPath },
+                { QStringLiteral("runnerWorkingTreeSha256"),
+                    runnerWorkingTreeSha256 },
+                { QStringLiteral("runnerGitBlobSha256"),
+                    runnerGitBlobSha256 },
+                { QStringLiteral("runnerCommit"), runnerCommit },
+            } },
+        } },
         { QStringLiteral("worker"), QJsonObject {
             { QStringLiteral("decoderInitialized"), decoderInitialized },
             { QStringLiteral("firstFramePublished"),
@@ -309,6 +414,9 @@ int run(int argc, char* argv[])
         { QStringLiteral("sinkFailureAndCleanup"), QJsonObject {
             { QStringLiteral("openFailureCode"), invalidOpenCode },
             { QStringLiteral("installFailureCode"), installFailureCode },
+            { QStringLiteral("publicationFailureCode"),
+                publicationFailureCode },
+            { QStringLiteral("firstFailureLatched"), firstFailureLatched },
             { QStringLiteral("conflictRejected"), competingInstallRejected },
             { QStringLiteral("cleanupReinstallSucceeded"),
                 cleanupReinstallSucceeded },

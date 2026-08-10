@@ -55,6 +55,34 @@ void writeLittleEndian(unsigned char* view, int offset, T value)
 namespace ArgusWorker
 {
 
+qint32 frameSlotPublishFailureCode(FrameSlotPublishStatus status)
+{
+    switch (status) {
+    case FrameSlotPublishStatus::Published:
+        return 0;
+    case FrameSlotPublishStatus::NotOpen:
+        return 1101;
+    case FrameSlotPublishStatus::TimedOut:
+        return 1102;
+    case FrameSlotPublishStatus::StaleSession:
+        return 1103;
+    case FrameSlotPublishStatus::OutOfOrder:
+        return 1104;
+    case FrameSlotPublishStatus::ExceedsBounds:
+        return 1105;
+    case FrameSlotPublishStatus::InvalidFrame:
+        return 1106;
+    case FrameSlotPublishStatus::IoFailure:
+        return 1107;
+    }
+    return 1107;
+}
+
+bool isKnownFrameSlotPublishFailureCode(qint32 code)
+{
+    return code >= 1101 && code <= 1107;
+}
+
 FrameSlotWriter::~FrameSlotWriter()
 {
     close();

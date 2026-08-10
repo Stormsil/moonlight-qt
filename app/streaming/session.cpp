@@ -1137,7 +1137,11 @@ bool Session::initializeArgusHeadless()
 
 int Session::argusFailureCode() const
 {
-    return m_ArgusTerminationCode.loadAcquire();
+    const qint32 sinkFailureCode =
+        ArgusWorker::activeDecodedFrameFailureCode();
+    return sinkFailureCode != 0
+        ? sinkFailureCode
+        : m_ArgusTerminationCode.loadAcquire();
 }
 
 Session::ArgusHeadlessOutcome Session::runArgusHeadless(
@@ -1171,6 +1175,7 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
         timer.start();
         while (timer.elapsed() < firstFrameTimeoutMilliseconds
                 && m_ArgusTerminationCode.loadAcquire() == 0
+                && ArgusWorker::activeDecodedFrameFailureCode() == 0
                 && ArgusWorker::activeDecodedFrameMetadata().frameCount == 0) {
             QCoreApplication::processEvents(
                 QEventLoop::ExcludeUserInputEvents);
@@ -1186,6 +1191,9 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
         }
         else if (m_ArgusTerminationCode.loadAcquire() != 0) {
             outcome = ArgusHeadlessOutcome::Terminated;
+        }
+        else if (ArgusWorker::activeDecodedFrameFailureCode() != 0) {
+            outcome = ArgusHeadlessOutcome::SinkFailed;
         }
         else {
             outcome = ArgusHeadlessOutcome::DecodeTimedOut;

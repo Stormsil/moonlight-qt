@@ -28,6 +28,9 @@ enum class FrameSlotPublishStatus
     IoFailure,
 };
 
+qint32 frameSlotPublishFailureCode(FrameSlotPublishStatus status);
+bool isKnownFrameSlotPublishFailureCode(qint32 code);
+
 class FrameSlotWriter
 {
 public:

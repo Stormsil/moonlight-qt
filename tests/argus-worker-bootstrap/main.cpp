@@ -181,6 +181,36 @@ void checkStreamRequestValidationFailures()
           "Frame-sink install failure must have a distinct failure");
 }
 
+void checkFrameSinkTerminalFailures()
+{
+    using Status = ArgusWorker::FrameSlotPublishStatus;
+    using ArgusWorker::frameSlotPublishFailureCode;
+    using ArgusWorker::isKnownFrameSlotPublishFailureCode;
+
+    const std::vector<std::pair<Status, qint32>> expected{
+        {Status::NotOpen, 1101},
+        {Status::TimedOut, 1102},
+        {Status::StaleSession, 1103},
+        {Status::OutOfOrder, 1104},
+        {Status::ExceedsBounds, 1105},
+        {Status::InvalidFrame, 1106},
+        {Status::IoFailure, 1107},
+    };
+    for (const auto& entry : expected) {
+        const qint32 code = frameSlotPublishFailureCode(entry.first);
+        check(code == entry.second,
+              "Frame-sink terminal failure code changed");
+        check(isKnownFrameSlotPublishFailureCode(code),
+              "Declared frame-sink terminal failure code must be known");
+    }
+    check(frameSlotPublishFailureCode(Status::Published) == 0,
+          "Published frames must not report a terminal failure");
+    check(!isKnownFrameSlotPublishFailureCode(0)
+              && !isKnownFrameSlotPublishFailureCode(1100)
+              && !isKnownFrameSlotPublishFailureCode(1108),
+          "Unknown frame-sink terminal failure codes must fail closed");
+}
+
 void appendInt32(QByteArray& bytes, qint32 value)
 {
     const qint32 littleEndian = qToLittleEndian(value);
@@ -1395,6 +1425,7 @@ int main(int argc, char* argv[])
     checkPairingControlCodec();
     checkStreamControlCodec();
     checkStreamRequestValidationFailures();
+    checkFrameSinkTerminalFailures();
 #if defined(ARGUS_COMMON_C_NO_INPUT)
     check(ArgusWorker::isStreamInputIsolationSupported(),
           "Argus patched builds must expose the verified no-input capability");

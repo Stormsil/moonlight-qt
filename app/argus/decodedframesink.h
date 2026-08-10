@@ -32,7 +32,7 @@ public:
         const StartupFrameSlotDescriptor& descriptor,
         const StartupSession& session);
     void close();
-    bool publish(AVFrame* frame);
+    FrameSlotPublishStatus publish(AVFrame* frame);
     DecodedFrameMetadata metadata() const;
 
 private:
@@ -44,7 +44,8 @@ private:
 
 bool installDecodedFrameSink(DecodedFrameSink* sink);
 void uninstallDecodedFrameSink(DecodedFrameSink* sink);
-void publishDecodedFrame(AVFrame* frame);
+FrameSlotPublishStatus publishDecodedFrame(AVFrame* frame);
 DecodedFrameMetadata activeDecodedFrameMetadata();
+qint32 activeDecodedFrameFailureCode();
 
 }

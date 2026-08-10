@@ -103,6 +103,7 @@ public:
         FirstFrame,
         ConnectFailed,
         DecodeTimedOut,
+        SinkFailed,
         Terminated,
     };
 

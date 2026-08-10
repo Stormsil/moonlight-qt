@@ -20,6 +20,7 @@ namespace
 {
 
 std::atomic<ArgusWorker::DecodedFrameSink*> activeSink { nullptr };
+std::atomic<qint32> activeSinkFailureCode { 0 };
 constexpr qint64 DotNetFileTimeOffsetTicks = 504911232000000000LL;
 
 qint64 currentUtcTicks()
@@ -69,14 +70,15 @@ void DecodedFrameSink::close()
     m_metadata = {};
 }
 
-bool DecodedFrameSink::publish(AVFrame* frame)
+FrameSlotPublishStatus DecodedFrameSink::publish(AVFrame* frame)
 {
     if (frame == nullptr
             || frame->width < 1
-            || frame->height < 1
-            || frame->width > 1920
-            || frame->height > 1080) {
-        return false;
+            || frame->height < 1) {
+        return FrameSlotPublishStatus::InvalidFrame;
+    }
+    if (frame->width > 1920 || frame->height > 1080) {
+        return FrameSlotPublishStatus::ExceedsBounds;
     }
 
     QMutexLocker locker(&m_mutex);
@@ -93,7 +95,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
                     frame,
                     0) < 0) {
             av_frame_free(&transferred);
-            return false;
+            return FrameSlotPublishStatus::IoFailure;
         }
         source = transferred;
     }
@@ -106,7 +108,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
     if (payloadLength < 1
             || payloadLength > 8 * 1024 * 1024) {
         av_frame_free(&transferred);
-        return false;
+        return FrameSlotPublishStatus::ExceedsBounds;
     }
 
     m_swsContext = sws_getCachedContext(
@@ -123,7 +125,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
         nullptr);
     if (m_swsContext == nullptr) {
         av_frame_free(&transferred);
-        return false;
+        return FrameSlotPublishStatus::InvalidFrame;
     }
 
     QByteArray pixels(
@@ -147,7 +149,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
     av_frame_free(&transferred);
     if (converted != sourceHeight) {
         secureZero(pixels.data(), pixels.size());
-        return false;
+        return FrameSlotPublishStatus::IoFailure;
     }
 
     const qint64 sequence = m_metadata.sequence + 1;
@@ -161,7 +163,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
         pixels);
     secureZero(pixels.data(), pixels.size());
     if (status != FrameSlotPublishStatus::Published) {
-        return false;
+        return status;
     }
 
     m_metadata.sequence = sequence;
@@ -170,7 +172,7 @@ bool DecodedFrameSink::publish(AVFrame* frame)
     m_metadata.height = sourceHeight;
     m_metadata.stride = stride;
     m_metadata.frameCount++;
-    return true;
+    return FrameSlotPublishStatus::Published;
 }
 
 DecodedFrameMetadata DecodedFrameSink::metadata() const
@@ -182,20 +184,33 @@ DecodedFrameMetadata DecodedFrameSink::metadata() const
 bool installDecodedFrameSink(DecodedFrameSink* sink)
 {
     DecodedFrameSink* expected = nullptr;
-    return activeSink.compare_exchange_strong(expected, sink);
+    if (!activeSink.compare_exchange_strong(expected, sink)) {
+        return false;
+    }
+    activeSinkFailureCode.store(0, std::memory_order_release);
+    return true;
 }
 
 void uninstallDecodedFrameSink(DecodedFrameSink* sink)
 {
-    activeSink.compare_exchange_strong(sink, nullptr);
+    if (activeSink.compare_exchange_strong(sink, nullptr)) {
+        activeSinkFailureCode.store(0, std::memory_order_release);
+    }
 }
 
-void publishDecodedFrame(AVFrame* frame)
+FrameSlotPublishStatus publishDecodedFrame(AVFrame* frame)
 {
     DecodedFrameSink* sink = activeSink.load(std::memory_order_acquire);
-    if (sink != nullptr) {
-        sink->publish(frame);
+    const FrameSlotPublishStatus status = sink != nullptr
+        ? sink->publish(frame)
+        : FrameSlotPublishStatus::NotOpen;
+    if (sink != nullptr && status != FrameSlotPublishStatus::Published) {
+        qint32 expected = 0;
+        activeSinkFailureCode.compare_exchange_strong(
+            expected,
+            frameSlotPublishFailureCode(status));
     }
+    return status;
 }
 
 DecodedFrameMetadata activeDecodedFrameMetadata()
@@ -204,6 +219,11 @@ DecodedFrameMetadata activeDecodedFrameMetadata()
     return sink != nullptr
         ? sink->metadata()
         : DecodedFrameMetadata {};
+}
+
+qint32 activeDecodedFrameFailureCode()
+{
+    return activeSinkFailureCode.load(std::memory_order_acquire);
 }
 
 }

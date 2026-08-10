@@ -194,6 +194,10 @@ StreamControlOutcome executeStreamControl(
             outcome = StreamControlOutcome::DecodeTimedOut;
             phase = StreamControlPhase::FirstFrameWait;
             break;
+        case Session::ArgusHeadlessOutcome::SinkFailed:
+            outcome = StreamControlOutcome::Unavailable;
+            phase = StreamControlPhase::FirstFrameWait;
+            break;
         case Session::ArgusHeadlessOutcome::ConnectFailed:
             phase = StreamControlPhase::ConnectionStart;
             outcome = StreamControlOutcome::Unavailable;
