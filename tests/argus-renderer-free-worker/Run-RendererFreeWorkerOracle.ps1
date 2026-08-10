@@ -130,7 +130,7 @@ if (-not (Test-Path -LiteralPath $output)) {
 $receipt = Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
 $bindingChecks = @(
     $receipt.passed
-    $receipt.schemaVersion -eq 2
+    $receipt.schemaVersion -eq 3
     $receipt.authority.artifact.sha256 -eq $artifactSha256
     $receipt.authority.artifact.length -eq $artifactLength
     $receipt.authority.artifact.sourceCommit -eq $head

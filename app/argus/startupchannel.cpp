@@ -26,6 +26,10 @@ constexpr qint32 PairingRequestMessageType = 1;
 constexpr qint32 PairingResponseMessageType = 2;
 constexpr qint32 StreamRequestMessageType = 3;
 constexpr qint32 StreamResponseMessageType = 4;
+constexpr qint32 FrameReadyMessageType = 5;
+constexpr qint32 FrameConsumedMessageType = 6;
+constexpr qint32 TerminalMessageType = 7;
+constexpr qint32 DisconnectMessageType = 8;
 
 class PacketReader
 {
@@ -231,7 +235,11 @@ bool isValidFrameSlot(
 {
     return !slot.mapName.isEmpty()
         && !slot.mutexName.isEmpty()
-        && slot.protocolVersion == 2
+        && std::any_of(
+            slot.frameSlotId.cbegin(),
+            slot.frameSlotId.cend(),
+            [](unsigned char value) { return value != 0; })
+        && slot.protocolVersion == 3
         && slot.maxWidth >= 1
         && slot.maxWidth <= MaximumFrameWidth
         && slot.maxHeight >= 1
@@ -895,6 +903,7 @@ void StartupPayload::clear()
     m_frameSlot.mapName.clear();
     m_frameSlot.mutexName.fill(QChar('\0'));
     m_frameSlot.mutexName.clear();
+    m_frameSlot.frameSlotId.fill(0);
     m_frameSlot.protocolVersion = 0;
     m_frameSlot.maxWidth = 0;
     m_frameSlot.maxHeight = 0;
@@ -1036,6 +1045,7 @@ StartupCodecStatus StartupCodec::decodePayload(
                 reader,
                 MaximumCapabilityNameBytes,
                 mutexNameBytes)
+            || !reader.readGuid(frameSlot.frameSlotId)
             || !reader.readInt32(frameSlot.protocolVersion)
             || !reader.readInt32(frameSlot.maxWidth)
             || !reader.readInt32(frameSlot.maxHeight)
@@ -1401,6 +1411,7 @@ void StreamControlRequest::clear()
     m_frameSlot.mapName.clear();
     m_frameSlot.mutexName.fill(QChar('\0'));
     m_frameSlot.mutexName.clear();
+    m_frameSlot.frameSlotId.fill(0);
     m_frameSlot.protocolVersion = 0;
     m_frameSlot.maxWidth = 0;
     m_frameSlot.maxHeight = 0;
@@ -1453,7 +1464,7 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
         mutexNameBytes.clear();
     };
     if (!reader.readInt32(version)
-            || version != StartupProtocolVersion
+            || version != StreamProtocolVersion
             || !reader.readInt32(messageType)
             || messageType != StreamRequestMessageType
             || !readSession(reader, session)
@@ -1485,6 +1496,7 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
                 reader,
                 MaximumCapabilityNameBytes,
                 mutexNameBytes)
+            || !reader.readGuid(slot.frameSlotId)
             || !reader.readInt32(slot.protocolVersion)
             || !reader.readInt32(slot.maxWidth)
             || !reader.readInt32(slot.maxHeight)
@@ -1558,6 +1570,58 @@ StreamControlCodecStatus StreamControlCodec::decodeRequest(
     request.m_frameSlot = slot;
     clearTemporaries();
     return StreamControlCodecStatus::Accepted;
+}
+
+StreamControlTransition StreamControlSequenceFence::acceptFrameReady(
+    qint64 sequence)
+{
+    if (m_terminal) {
+        return StreamControlTransition::Terminal;
+    }
+    if (m_outstandingSequence != 0) {
+        return StreamControlTransition::OutstandingFrame;
+    }
+    if (sequence != m_lastConsumedSequence + 1) {
+        return sequence <= m_lastConsumedSequence
+            ? StreamControlTransition::Duplicate
+            : StreamControlTransition::WrongSequence;
+    }
+
+    m_outstandingSequence = sequence;
+    return StreamControlTransition::Accepted;
+}
+
+StreamControlTransition StreamControlSequenceFence::acceptFrameConsumed(
+    qint64 sequence)
+{
+    if (m_terminal) {
+        return StreamControlTransition::Terminal;
+    }
+    if (m_outstandingSequence == 0) {
+        return sequence <= m_lastConsumedSequence
+            ? StreamControlTransition::Duplicate
+            : StreamControlTransition::WrongSequence;
+    }
+    if (sequence != m_outstandingSequence) {
+        return StreamControlTransition::WrongSequence;
+    }
+
+    m_lastConsumedSequence = sequence;
+    m_outstandingSequence = 0;
+    return StreamControlTransition::Accepted;
+}
+
+StreamControlTransition StreamControlSequenceFence::acceptTerminal()
+{
+    if (m_terminal) {
+        return StreamControlTransition::Terminal;
+    }
+    if (m_outstandingSequence != 0) {
+        return StreamControlTransition::OutstandingFrame;
+    }
+
+    m_terminal = true;
+    return StreamControlTransition::Accepted;
 }
 
 const StartupSession& StreamControlResponse::session() const
@@ -1694,6 +1758,162 @@ StreamControlCodecStatus StreamControlCodec::encodeResponse(
     return StreamControlCodecStatus::Accepted;
 }
 
+StreamControlCodecStatus StreamControlCodec::encodeFrameReady(
+    const StartupSession& session,
+    const QByteArray& nonce,
+    const StartupGuidBytes& frameSlotId,
+    qint64 sequence,
+    qint32 width,
+    qint32 height,
+    qint32 stride,
+    qint64 timestampUtcTicks,
+    QByteArray& packet)
+{
+    secureZero(packet.data(), packet.size());
+    packet.clear();
+    const bool valid = nonce.size() == StartupNonceBytes
+        && std::any_of(
+            frameSlotId.cbegin(),
+            frameSlotId.cend(),
+            [](unsigned char value) { return value != 0; })
+        && sequence >= 1
+        && width >= 1
+        && width <= MaximumFrameWidth
+        && height >= 1
+        && height <= MaximumFrameHeight
+        && stride >= width * 4
+        && static_cast<qint64>(stride) * height
+            <= MaximumFramePayloadBytes
+        && timestampUtcTicks >= 621355968000000000LL
+        && timestampUtcTicks <= 3155378975999999999LL;
+    if (!valid) {
+        return StreamControlCodecStatus::InvalidPacket;
+    }
+
+    appendInt32(packet, StreamProtocolVersion);
+    appendInt32(packet, FrameReadyMessageType);
+    appendSession(packet, session);
+    appendInt32(packet, nonce.size());
+    packet.append(nonce);
+    packet.append(
+        reinterpret_cast<const char*>(frameSlotId.data()),
+        static_cast<qsizetype>(frameSlotId.size()));
+    appendInt64(packet, sequence);
+    appendInt32(packet, width);
+    appendInt32(packet, height);
+    appendInt32(packet, stride);
+    appendInt32(packet, 0);
+    appendInt64(packet, timestampUtcTicks);
+    return StreamControlCodecStatus::Accepted;
+}
+
+StreamControlCodecStatus StreamControlCodec::decodeCommand(
+    const QByteArray& packet,
+    const StartupSession& expectedSession,
+    const QByteArray& expectedNonce,
+    const StartupGuidBytes& expectedFrameSlotId,
+    StreamControlCommand& command)
+{
+    command = {};
+    if (packet.size() < 100
+            || packet.size() > MaximumStartupPacketBytes) {
+        return StreamControlCodecStatus::PacketOutOfBounds;
+    }
+
+    PacketReader reader(packet);
+    qint32 version;
+    qint32 messageType;
+    StartupSession session;
+    QByteArray nonce;
+    StartupGuidBytes frameSlotId {};
+    qint64 sequence = 0;
+    if (!reader.readInt32(version)
+            || version != StreamProtocolVersion
+            || !reader.readInt32(messageType)
+            || (messageType != FrameConsumedMessageType
+                && messageType != DisconnectMessageType)
+            || !readSession(reader, session)
+            || !readBoundedBytes(reader, StartupNonceBytes, nonce)
+            || nonce.size() != StartupNonceBytes
+            || !reader.readGuid(frameSlotId)
+            || (messageType == FrameConsumedMessageType
+                && !reader.readInt64(sequence))
+            || !reader.atEnd()) {
+        secureZero(nonce.data(), nonce.size());
+        return StreamControlCodecStatus::InvalidPacket;
+    }
+    if (!(session == expectedSession)) {
+        secureZero(nonce.data(), nonce.size());
+        return StreamControlCodecStatus::SessionMismatch;
+    }
+    if (expectedNonce.size() != StartupNonceBytes
+            || !fixedTimeEquals(nonce, expectedNonce)) {
+        secureZero(nonce.data(), nonce.size());
+        return StreamControlCodecStatus::NonceMismatch;
+    }
+    secureZero(nonce.data(), nonce.size());
+    if (!std::equal(
+            frameSlotId.cbegin(),
+            frameSlotId.cend(),
+            expectedFrameSlotId.cbegin())
+            || (messageType == FrameConsumedMessageType
+                && sequence < 1)) {
+        return StreamControlCodecStatus::InvalidPacket;
+    }
+
+    command.kind = messageType == FrameConsumedMessageType
+        ? StreamControlCommandKind::FrameConsumed
+        : StreamControlCommandKind::Disconnect;
+    command.sequence = sequence;
+    return StreamControlCodecStatus::Accepted;
+}
+
+StreamControlCodecStatus StreamControlCodec::encodeTerminal(
+    const StreamControlResponse& response,
+    const QByteArray& nonce,
+    const StartupGuidBytes& frameSlotId,
+    QByteArray& packet)
+{
+    secureZero(packet.data(), packet.size());
+    packet.clear();
+    const bool completed =
+        response.outcome() == StreamControlOutcome::Completed;
+    const bool valid = nonce.size() == StartupNonceBytes
+        && std::any_of(
+            frameSlotId.cbegin(),
+            frameSlotId.cend(),
+            [](unsigned char value) { return value != 0; })
+        && (completed
+            ? response.phase() == StreamControlPhase::Completed
+                && response.failureCode() == 0
+                && response.frameCount() >= 1
+                && response.disconnectClean()
+            : response.phase() != StreamControlPhase::Completed
+                && (response.outcome() == StreamControlOutcome::Unavailable
+                    || response.outcome() == StreamControlOutcome::Rejected
+                    || response.outcome()
+                        == StreamControlOutcome::DecodeTimedOut)
+                && response.frameCount() == 0);
+    if (!valid) {
+        return StreamControlCodecStatus::InvalidPacket;
+    }
+
+    appendInt32(packet, StreamProtocolVersion);
+    appendInt32(packet, TerminalMessageType);
+    appendSession(packet, response.session());
+    appendInt32(packet, nonce.size());
+    packet.append(nonce);
+    packet.append(
+        reinterpret_cast<const char*>(frameSlotId.data()),
+        static_cast<qsizetype>(frameSlotId.size()));
+    appendInt32(packet, static_cast<qint32>(response.outcome()));
+    appendInt32(packet, static_cast<qint32>(response.phase()));
+    appendInt32(packet, response.failureCode());
+    appendInt32(packet, response.frameCount());
+    appendInt32(packet, response.disconnectClean() ? 1 : 0);
+    return StreamControlCodecStatus::Accepted;
+}
+
 StartupChannelStatus StartupChannel::receive(
     const QString& pipeName,
     StartupPayload& payload)
@@ -1822,6 +2042,7 @@ StartupChannelStatus StartupChannel::receiveStreamRequest(
     packet.clear();
     m_streamResponsePending =
         status == StartupChannelStatus::Accepted;
+    m_streamActive = status == StartupChannelStatus::Accepted;
     return status;
 #else
     Q_UNUSED(expectedSession);
@@ -1836,6 +2057,7 @@ StartupChannelStatus StartupChannel::sendStreamResponse(
         return StartupChannelStatus::AlreadyUsed;
     }
     m_streamResponsePending = false;
+    m_streamActive = false;
 #if defined(Q_OS_WIN)
     HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
     if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
@@ -1854,6 +2076,133 @@ StartupChannelStatus StartupChannel::sendStreamResponse(
     return status;
 #else
     Q_UNUSED(response);
+    return StartupChannelStatus::PipeUnavailable;
+#endif
+}
+
+StartupChannelStatus StartupChannel::sendFrameReady(
+    const StartupSession& session,
+    const StartupFrameSlotDescriptor& frameSlot,
+    qint64 sequence,
+    qint32 width,
+    qint32 height,
+    qint32 stride,
+    qint64 timestampUtcTicks)
+{
+    if (!m_streamActive) {
+        return StartupChannelStatus::AlreadyUsed;
+    }
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return StartupChannelStatus::PipeUnavailable;
+    }
+    QByteArray packet;
+    StartupChannelStatus status = mapStreamCodecStatus(
+        StreamControlCodec::encodeFrameReady(
+            session,
+            m_channelNonce,
+            frameSlot.frameSlotId,
+            sequence,
+            width,
+            height,
+            stride,
+            timestampUtcTicks,
+            packet));
+    if (status == StartupChannelStatus::Accepted) {
+        status = writePacket(
+            pipe,
+            GetTickCount64() + StartupIoTimeoutMilliseconds,
+            packet);
+    }
+    secureZero(packet.data(), packet.size());
+    return status;
+#else
+    Q_UNUSED(session);
+    Q_UNUSED(frameSlot);
+    Q_UNUSED(sequence);
+    Q_UNUSED(width);
+    Q_UNUSED(height);
+    Q_UNUSED(stride);
+    Q_UNUSED(timestampUtcTicks);
+    return StartupChannelStatus::PipeUnavailable;
+#endif
+}
+
+StartupChannelStatus StartupChannel::receiveStreamCommand(
+    const StartupSession& expectedSession,
+    const StartupFrameSlotDescriptor& frameSlot,
+    StreamControlCommand& command,
+    qint32 timeoutMilliseconds)
+{
+    command = {};
+    if (!m_streamActive) {
+        return StartupChannelStatus::AlreadyUsed;
+    }
+    if (timeoutMilliseconds < 1 || timeoutMilliseconds > 30000) {
+        return StartupChannelStatus::InvalidPayload;
+    }
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return StartupChannelStatus::PipeUnavailable;
+    }
+    QByteArray packet;
+    StartupChannelStatus status = readPacket(
+        pipe,
+        GetTickCount64() + static_cast<ULONGLONG>(timeoutMilliseconds),
+        packet);
+    if (status == StartupChannelStatus::Accepted) {
+        status = mapStreamCodecStatus(
+            StreamControlCodec::decodeCommand(
+                packet,
+                expectedSession,
+                m_channelNonce,
+                frameSlot.frameSlotId,
+                command));
+    }
+    secureZero(packet.data(), packet.size());
+    return status;
+#else
+    Q_UNUSED(expectedSession);
+    Q_UNUSED(frameSlot);
+    Q_UNUSED(timeoutMilliseconds);
+    return StartupChannelStatus::PipeUnavailable;
+#endif
+}
+
+StartupChannelStatus StartupChannel::sendStreamTerminal(
+    const StreamControlResponse& response,
+    const StartupFrameSlotDescriptor& frameSlot)
+{
+    if (!m_streamActive) {
+        return StartupChannelStatus::AlreadyUsed;
+    }
+    m_streamActive = false;
+    m_streamResponsePending = false;
+#if defined(Q_OS_WIN)
+    HANDLE pipe = static_cast<HANDLE>(m_pipeHandle);
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return StartupChannelStatus::PipeUnavailable;
+    }
+    QByteArray packet;
+    StartupChannelStatus status = mapStreamCodecStatus(
+        StreamControlCodec::encodeTerminal(
+            response,
+            m_channelNonce,
+            frameSlot.frameSlotId,
+            packet));
+    if (status == StartupChannelStatus::Accepted) {
+        status = writePacket(
+            pipe,
+            GetTickCount64() + StartupIoTimeoutMilliseconds,
+            packet);
+    }
+    secureZero(packet.data(), packet.size());
+    return status;
+#else
+    Q_UNUSED(response);
+    Q_UNUSED(frameSlot);
     return StartupChannelStatus::PipeUnavailable;
 #endif
 }

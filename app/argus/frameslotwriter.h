@@ -22,6 +22,7 @@ enum class FrameSlotPublishStatus
     NotOpen,
     TimedOut,
     StaleSession,
+    OutstandingFrame,
     OutOfOrder,
     ExceedsBounds,
     InvalidFrame,
@@ -50,6 +51,9 @@ public:
         qint32 height,
         qint32 stride,
         const QByteArray& bgraPixels);
+
+    bool confirmConsumed(qint64 sequence);
+    void discardOutstanding();
 
     void close();
 

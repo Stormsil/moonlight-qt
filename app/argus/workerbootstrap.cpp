@@ -212,7 +212,7 @@ int runStartup(const QStringList& arguments)
                 true);
             endpoint.fill(QChar('\0'));
             endpoint.clear();
-            if (channel.sendStreamResponse(response)
+            if (channel.sendStreamTerminal(response, frameSlot)
                     != StartupChannelStatus::Accepted) {
                 return ExitHandshakeUnavailable;
             }
@@ -223,13 +223,14 @@ int runStartup(const QStringList& arguments)
                 endpoint,
                 displayId,
                 frameSlot,
+                channel,
                 request,
                 response);
         endpoint.fill(QChar('\0'));
         endpoint.clear();
         displayId.fill(QChar('\0'));
         displayId.clear();
-        if (channel.sendStreamResponse(response)
+        if (channel.sendStreamTerminal(response, frameSlot)
                 != StartupChannelStatus::Accepted) {
             return ExitHandshakeUnavailable;
         }

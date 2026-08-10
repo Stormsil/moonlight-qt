@@ -9,6 +9,7 @@ bool sameFrameSlot(
 {
     return left.mapName == right.mapName
         && left.mutexName == right.mutexName
+        && left.frameSlotId == right.frameSlotId
         && left.protocolVersion == right.protocolVersion
         && left.maxWidth == right.maxWidth
         && left.maxHeight == right.maxHeight

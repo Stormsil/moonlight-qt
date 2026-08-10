@@ -53,6 +53,11 @@ $workerInitialization = Get-CppFunctionBody `
 $interactiveInitialization = Get-CppFunctionBody `
     -Source $sessionSource `
     -Signature 'bool Session::initialize(QQuickWindow* qtWindow)'
+$streamClientPath = Join-Path $RepositoryRoot 'app\argus\streamclient.cpp'
+$streamClientSource = Get-Content -LiteralPath $streamClientPath -Raw
+$streamControl = Get-CppFunctionBody `
+    -Source $streamClientSource `
+    -Signature 'StreamControlOutcome executeStreamControl('
 
 if ($workerRun.Contains(
         'SDL_CreateWindow',
@@ -82,6 +87,29 @@ if (-not $interactiveInitialization.Contains(
         'StreamUtils::createTestWindow()',
         [System.StringComparison]::Ordinal)) {
     throw 'Ordinary interactive initialization no longer constructs its decoder test window.'
+}
+
+$requiredStreamControlCalls = @(
+    'sendFrameReady('
+    'receiveStreamCommand('
+    'acceptFrameConsumed('
+    'acknowledgeConsumed('
+    'waitForFrameOrControl('
+    'stopArgusHeadless()')
+foreach ($requiredCall in $requiredStreamControlCalls) {
+    if (-not $streamControl.Contains(
+            $requiredCall,
+            [System.StringComparison]::Ordinal)) {
+        throw "Argus multi-frame stream control is missing: $requiredCall"
+    }
+}
+if ($streamControl.Contains(
+        'PltSleepMs(',
+        [System.StringComparison]::Ordinal) -or
+    $streamControl.Contains(
+        'QThread::msleep(',
+        [System.StringComparison]::Ordinal)) {
+    throw 'Argus multi-frame stream control regressed to polling.'
 }
 
 $sdlRendererPath = Join-Path $RepositoryRoot `

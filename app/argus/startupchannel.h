@@ -10,6 +10,7 @@ namespace ArgusWorker
 {
 
 inline constexpr int StartupProtocolVersion = 3;
+inline constexpr int StreamProtocolVersion = 2;
 inline constexpr int StartupNonceBytes = 32;
 inline constexpr int MaximumStartupPacketBytes =
     (256 * 1024) + (64 * 1024) + 8192;
@@ -53,10 +54,33 @@ struct StartupFrameSlotDescriptor
 {
     QString mapName;
     QString mutexName;
+    StartupGuidBytes frameSlotId {};
     qint32 protocolVersion = 0;
     qint32 maxWidth = 0;
     qint32 maxHeight = 0;
     qint32 maxPayloadBytes = 0;
+};
+
+enum class StreamControlTransition
+{
+    Accepted,
+    OutstandingFrame,
+    WrongSequence,
+    Duplicate,
+    Terminal,
+};
+
+class StreamControlSequenceFence
+{
+public:
+    StreamControlTransition acceptFrameReady(qint64 sequence);
+    StreamControlTransition acceptFrameConsumed(qint64 sequence);
+    StreamControlTransition acceptTerminal();
+
+private:
+    qint64 m_lastConsumedSequence = 0;
+    qint64 m_outstandingSequence = 0;
+    bool m_terminal = false;
 };
 
 class StartupPayload
@@ -261,6 +285,19 @@ enum class StreamControlCodecStatus
     NonceMismatch,
 };
 
+enum class StreamControlCommandKind
+{
+    FrameConsumed,
+    Disconnect,
+};
+
+struct StreamControlCommand
+{
+    StreamControlCommandKind kind =
+        StreamControlCommandKind::Disconnect;
+    qint64 sequence = 0;
+};
+
 enum class StreamControlOutcome
 {
     Completed = 1,
@@ -339,6 +376,30 @@ public:
     static StreamControlCodecStatus encodeResponse(
         const StreamControlResponse& response,
         QByteArray& packet);
+
+    static StreamControlCodecStatus encodeFrameReady(
+        const StartupSession& session,
+        const QByteArray& nonce,
+        const StartupGuidBytes& frameSlotId,
+        qint64 sequence,
+        qint32 width,
+        qint32 height,
+        qint32 stride,
+        qint64 timestampUtcTicks,
+        QByteArray& packet);
+
+    static StreamControlCodecStatus decodeCommand(
+        const QByteArray& packet,
+        const StartupSession& expectedSession,
+        const QByteArray& expectedNonce,
+        const StartupGuidBytes& expectedFrameSlotId,
+        StreamControlCommand& command);
+
+    static StreamControlCodecStatus encodeTerminal(
+        const StreamControlResponse& response,
+        const QByteArray& nonce,
+        const StartupGuidBytes& frameSlotId,
+        QByteArray& packet);
 };
 
 enum class StartupChannelStatus
@@ -382,12 +443,32 @@ public:
     StartupChannelStatus sendStreamResponse(
         const StreamControlResponse& response);
 
+    StartupChannelStatus sendFrameReady(
+        const StartupSession& session,
+        const StartupFrameSlotDescriptor& frameSlot,
+        qint64 sequence,
+        qint32 width,
+        qint32 height,
+        qint32 stride,
+        qint64 timestampUtcTicks);
+
+    StartupChannelStatus receiveStreamCommand(
+        const StartupSession& expectedSession,
+        const StartupFrameSlotDescriptor& frameSlot,
+        StreamControlCommand& command,
+        qint32 timeoutMilliseconds);
+
+    StartupChannelStatus sendStreamTerminal(
+        const StreamControlResponse& response,
+        const StartupFrameSlotDescriptor& frameSlot);
+
 private:
     bool m_used = false;
     bool m_pairingUsed = false;
     bool m_pairingResponsePending = false;
     bool m_streamUsed = false;
     bool m_streamResponsePending = false;
+    bool m_streamActive = false;
     QByteArray m_channelNonce;
     void* m_pipeHandle = nullptr;
 };

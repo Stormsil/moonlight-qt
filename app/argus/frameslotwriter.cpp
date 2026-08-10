@@ -2,6 +2,7 @@
 
 #include <QtEndian>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -14,20 +15,22 @@
 namespace
 {
 
-constexpr int PayloadOffset = 144;
+constexpr int PayloadOffset = 160;
 constexpr int StateOffset = 12;
 constexpr int GenerationOffset = 16;
 constexpr int MachineOffset = 24;
 constexpr int AttemptOffset = 40;
 constexpr int SessionOffset = 56;
-constexpr int SequenceOffset = 72;
-constexpr int TimestampOffset = 80;
-constexpr int WidthOffset = 88;
-constexpr int HeightOffset = 92;
-constexpr int StrideOffset = 96;
-constexpr int FormatOffset = 100;
-constexpr int PayloadLengthOffset = 104;
-constexpr int ChecksumOffset = 112;
+constexpr int FrameSlotIdOffset = 72;
+constexpr int SequenceOffset = 88;
+constexpr int TimestampOffset = 96;
+constexpr int WidthOffset = 104;
+constexpr int HeightOffset = 108;
+constexpr int StrideOffset = 112;
+constexpr int FormatOffset = 116;
+constexpr int PayloadLengthOffset = 120;
+constexpr int ChecksumOffset = 128;
+constexpr int EmptyState = 0;
 constexpr int WritingState = 1;
 constexpr int CommittedState = 2;
 constexpr int Bgra32Format = 0;
@@ -59,6 +62,7 @@ qint32 frameSlotPublishFailureCode(FrameSlotPublishStatus status)
 {
     switch (status) {
     case FrameSlotPublishStatus::Published:
+    case FrameSlotPublishStatus::OutstandingFrame:
         return 0;
     case FrameSlotPublishStatus::NotOpen:
         return 1101;
@@ -93,7 +97,11 @@ FrameSlotWriterStatus FrameSlotWriter::open(
     const StartupSession& session)
 {
     close();
-    if (descriptor.protocolVersion != 2
+    if (descriptor.protocolVersion != 3
+            || std::all_of(
+                descriptor.frameSlotId.cbegin(),
+                descriptor.frameSlotId.cend(),
+                [](unsigned char value) { return value == 0; })
             || descriptor.maxWidth < 1
             || descriptor.maxWidth > 1920
             || descriptor.maxHeight < 1
@@ -200,9 +208,15 @@ FrameSlotPublishStatus FrameSlotWriter::publish(
         const qint32 state = readLittleEndian<qint32>(
             m_view,
             StateOffset);
-        const qint64 currentSequence = state == CommittedState
-            ? readLittleEndian<qint64>(m_view, SequenceOffset)
-            : 0;
+        if (state == CommittedState) {
+            result = FrameSlotPublishStatus::OutstandingFrame;
+            break;
+        }
+        if (state != EmptyState) {
+            break;
+        }
+        const qint64 currentSequence =
+            readLittleEndian<qint64>(m_view, SequenceOffset);
         if (sequence <= currentSequence) {
             result = FrameSlotPublishStatus::OutOfOrder;
             break;
@@ -270,12 +284,67 @@ FrameSlotPublishStatus FrameSlotWriter::publish(
     return result;
 }
 
+bool FrameSlotWriter::confirmConsumed(qint64 sequence)
+{
+    if (m_view == nullptr || sequence < 1 || !lock()) {
+        return false;
+    }
+    const bool consumed = headerMatches()
+        && readLittleEndian<qint32>(m_view, StateOffset) == EmptyState
+        && readLittleEndian<qint64>(m_view, SequenceOffset) == sequence;
+    unlock();
+    return consumed;
+}
+
+void FrameSlotWriter::discardOutstanding()
+{
+    if (m_view == nullptr || !lock()) {
+        return;
+    }
+    if (headerMatches()
+            && readLittleEndian<qint32>(m_view, StateOffset)
+                == CommittedState) {
+        const qint32 payloadLength = readLittleEndian<qint32>(
+            m_view,
+            PayloadLengthOffset);
+        if (payloadLength >= 1
+                && payloadLength <= m_descriptor.maxPayloadBytes) {
+            secureZero(m_view + PayloadOffset, payloadLength);
+        }
+        secureZero(m_view + ChecksumOffset, SHA256_DIGEST_LENGTH);
+        writeLittleEndian<qint64>(m_view, TimestampOffset, 0);
+        writeLittleEndian<qint32>(m_view, WidthOffset, 0);
+        writeLittleEndian<qint32>(m_view, HeightOffset, 0);
+        writeLittleEndian<qint32>(m_view, StrideOffset, 0);
+        writeLittleEndian<qint32>(m_view, FormatOffset, 0);
+        writeLittleEndian<qint32>(m_view, PayloadLengthOffset, 0);
+#if defined(Q_OS_WIN)
+        const bool flushedContents = FlushViewOfFile(
+            m_view,
+            static_cast<SIZE_T>(PayloadOffset
+                + std::max(payloadLength, 0))) != FALSE;
+        MemoryBarrier();
+#else
+        const bool flushedContents = true;
+#endif
+        if (flushedContents) {
+            writeLittleEndian<qint32>(m_view, StateOffset, EmptyState);
+#if defined(Q_OS_WIN)
+            MemoryBarrier();
+            FlushViewOfFile(m_view + StateOffset, sizeof(qint32));
+#endif
+        }
+    }
+    unlock();
+}
+
 void FrameSlotWriter::close()
 {
 #if defined(Q_OS_WIN)
     if (m_locked) {
         unlock();
     }
+    discardOutstanding();
     if (m_view != nullptr) {
         UnmapViewOfFile(m_view);
     }
@@ -293,6 +362,7 @@ void FrameSlotWriter::close()
     m_descriptor.mapName.clear();
     m_descriptor.mutexName.fill(QChar('\0'));
     m_descriptor.mutexName.clear();
+    m_descriptor.frameSlotId.fill(0);
     m_descriptor.protocolVersion = 0;
     m_descriptor.maxWidth = 0;
     m_descriptor.maxHeight = 0;
@@ -304,11 +374,15 @@ void FrameSlotWriter::close()
 bool FrameSlotWriter::headerMatches() const
 {
     return m_view != nullptr
-        && std::memcmp(m_view, "ARGFRM02", 8) == 0
-        && readLittleEndian<qint32>(m_view, 8) == 2
+        && std::memcmp(m_view, "ARGFRM03", 8) == 0
+        && readLittleEndian<qint32>(m_view, 8) == 3
         && std::memcmp(m_view + MachineOffset, m_session.machineId.data(), 16) == 0
         && std::memcmp(m_view + AttemptOffset, m_session.attemptId.data(), 16) == 0
-        && std::memcmp(m_view + SessionOffset, m_session.sessionId.data(), 16) == 0;
+        && std::memcmp(m_view + SessionOffset, m_session.sessionId.data(), 16) == 0
+        && std::memcmp(
+            m_view + FrameSlotIdOffset,
+            m_descriptor.frameSlotId.data(),
+            16) == 0;
 }
 
 bool FrameSlotWriter::lock()

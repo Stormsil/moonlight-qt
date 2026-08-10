@@ -114,6 +114,7 @@ public:
     bool initializeArgusHeadless();
     ArgusHeadlessOutcome runArgusHeadless(
         int firstFrameTimeoutMilliseconds);
+    void stopArgusHeadless();
     int argusFailureCode() const;
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();

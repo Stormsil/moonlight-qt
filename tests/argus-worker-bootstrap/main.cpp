@@ -66,15 +66,16 @@ void checkStreamRequestValidationFailures()
     using Failure = ArgusWorker::StreamRequestValidationFailure;
     using ArgusWorker::streamRequestValidationFailureCode;
 
-    const ArgusWorker::StartupFrameSlotDescriptor slot{
-        QStringLiteral("Local\\Argus.Stream.Frame.test"),
-        QStringLiteral("Local\\Argus.Stream.FrameLock.test"),
-        1,
-        1920,
-        1080,
-        1920 * 1080 * 4};
+    ArgusWorker::StartupFrameSlotDescriptor slot;
+    slot.mapName = QStringLiteral("Local\\Argus.Stream.Frame.test");
+    slot.mutexName = QStringLiteral("Local\\Argus.Stream.FrameLock.test");
+    slot.frameSlotId[0] = 1;
+    slot.protocolVersion = 3;
+    slot.maxWidth = 1920;
+    slot.maxHeight = 1080;
+    slot.maxPayloadBytes = 1920 * 1080 * 4;
     ArgusWorker::StartupFrameSlotDescriptor differentSlot = slot;
-    differentSlot.maxPayloadBytes--;
+    differentSlot.frameSlotId[1] = 2;
 
     const std::vector<std::pair<Failure, qint32>> expected{
         {Failure::InputIsolationUnavailable, 1001},
@@ -438,7 +439,9 @@ QByteArray encodePayload(
     if (includeFrameSlot) {
         appendText(payload, "Local\\Argus.Stream.Frame.test");
         appendText(payload, "Local\\Argus.Stream.FrameLock.test");
-        appendInt32(payload, 2);
+        payload.append(QByteArray::fromHex(
+            "d0749ffb583d5a46b0a5047e3ddd5a90"));
+        appendInt32(payload, 3);
         appendInt32(payload, maxWidth);
         appendInt32(payload, 1080);
         appendInt32(payload, 8 * 1024 * 1024);
@@ -453,7 +456,7 @@ QByteArray encodeStreamRequest(
     const QByteArray& serverCertificate = "server-certificate")
 {
     QByteArray request;
-    appendInt32(request, ArgusWorker::StartupProtocolVersion);
+    appendInt32(request, ArgusWorker::StreamProtocolVersion);
     appendInt32(request, 3);
     request.append(encodeSession(session));
     appendText(request, nonce);
@@ -468,7 +471,9 @@ QByteArray encodeStreamRequest(
     appendInt32(request, 15000);
     appendText(request, "Local\\Argus.Stream.Frame.fixture");
     appendText(request, "Local\\Argus.Stream.FrameLock.fixture");
-    appendInt32(request, 2);
+    request.append(QByteArray::fromHex(
+        "d0749ffb583d5a46b0a5047e3ddd5a90"));
+    appendInt32(request, 3);
     appendInt32(request, 1920);
     appendInt32(request, 1080);
     appendInt32(request, 8 * 1024 * 1024);
@@ -500,8 +505,121 @@ void checkStreamControlCodec()
               && request.height() == 1080
               && request.framesPerSecond() == 60
               && request.firstFrameTimeoutMilliseconds() == 15000
-              && request.frameSlot().protocolVersion == 2,
+              && request.frameSlot().protocolVersion == 3,
           "Stream request fields must retain exact managed bytes");
+
+    ArgusWorker::StreamControlSequenceFence fence;
+    check(fence.acceptFrameReady(1)
+              == ArgusWorker::StreamControlTransition::Accepted,
+          "First native frame-ready transition must be accepted");
+    check(fence.acceptFrameReady(2)
+              == ArgusWorker::StreamControlTransition::OutstandingFrame,
+          "Native worker must reject a second outstanding frame");
+    check(fence.acceptFrameConsumed(2)
+              == ArgusWorker::StreamControlTransition::WrongSequence,
+          "Native worker must reject an out-of-order acknowledgement");
+    check(fence.acceptFrameConsumed(1)
+              == ArgusWorker::StreamControlTransition::Accepted,
+          "Native worker must accept the exact acknowledgement");
+    check(fence.acceptFrameConsumed(1)
+              == ArgusWorker::StreamControlTransition::Duplicate,
+          "Native worker must reject duplicate acknowledgement");
+    check(fence.acceptFrameReady(2)
+              == ArgusWorker::StreamControlTransition::Accepted,
+          "Native worker must admit the next sequence after consumption");
+    check(fence.acceptFrameConsumed(2)
+              == ArgusWorker::StreamControlTransition::Accepted,
+          "Native worker must consume the second sequence exactly");
+    check(fence.acceptTerminal()
+              == ArgusWorker::StreamControlTransition::Accepted,
+          "Native worker must admit one terminal after all frames");
+    check(fence.acceptTerminal()
+              == ArgusWorker::StreamControlTransition::Terminal,
+          "Native worker must reject duplicate terminal state");
+
+    QByteArray frameReady;
+    check(ArgusWorker::StreamControlCodec::encodeFrameReady(
+              session,
+              nonce,
+              request.frameSlot().frameSlotId,
+              1,
+              1920,
+              1080,
+              7680,
+              638895345678901234LL,
+              frameReady)
+              == ArgusWorker::StreamControlCodecStatus::Accepted,
+          "Authenticated frame-ready metadata must encode");
+    QByteArray expectedFrameReady;
+    appendInt32(expectedFrameReady, ArgusWorker::StreamProtocolVersion);
+    appendInt32(expectedFrameReady, 5);
+    expectedFrameReady.append(encodeSession(session));
+    appendText(expectedFrameReady, nonce);
+    expectedFrameReady.append(reinterpret_cast<const char*>(
+        request.frameSlot().frameSlotId.data()), 16);
+    appendInt64(expectedFrameReady, 1);
+    appendInt32(expectedFrameReady, 1920);
+    appendInt32(expectedFrameReady, 1080);
+    appendInt32(expectedFrameReady, 7680);
+    appendInt32(expectedFrameReady, 0);
+    appendInt64(expectedFrameReady, 638895345678901234LL);
+    check(frameReady == expectedFrameReady,
+          "Frame-ready must match the managed metadata-only contract");
+
+    QByteArray consumed;
+    appendInt32(consumed, ArgusWorker::StreamProtocolVersion);
+    appendInt32(consumed, 6);
+    consumed.append(encodeSession(session));
+    appendText(consumed, nonce);
+    consumed.append(reinterpret_cast<const char*>(
+        request.frameSlot().frameSlotId.data()), 16);
+    appendInt64(consumed, 1);
+    ArgusWorker::StreamControlCommand command;
+    check(ArgusWorker::StreamControlCodec::decodeCommand(
+              consumed,
+              session,
+              nonce,
+              request.frameSlot().frameSlotId,
+              command)
+              == ArgusWorker::StreamControlCodecStatus::Accepted
+              && command.kind
+                  == ArgusWorker::StreamControlCommandKind::FrameConsumed
+              && command.sequence == 1,
+          "Exact frame-consumed binding must decode");
+    ArgusWorker::StartupGuidBytes wrongSlot =
+        request.frameSlot().frameSlotId;
+    wrongSlot[0] ^= 0xff;
+    check(ArgusWorker::StreamControlCodec::decodeCommand(
+              consumed,
+              session,
+              nonce,
+              wrongSlot,
+              command)
+              == ArgusWorker::StreamControlCodecStatus::InvalidPacket,
+          "Wrong-slot acknowledgement must fail closed");
+
+    ArgusWorker::StartupSession wrongCommandSession = session;
+    wrongCommandSession.sessionId[0] ^= 0xff;
+    check(ArgusWorker::StreamControlCodec::decodeCommand(
+              consumed,
+              wrongCommandSession,
+              nonce,
+              request.frameSlot().frameSlotId,
+              command)
+              == ArgusWorker::StreamControlCodecStatus::SessionMismatch,
+          "Wrong-session acknowledgement must fail closed");
+
+    QByteArray wrongCommandNonce = nonce;
+    wrongCommandNonce[0] ^= static_cast<char>(0xff);
+    check(ArgusWorker::StreamControlCodec::decodeCommand(
+              consumed,
+              session,
+              wrongCommandNonce,
+              request.frameSlot().frameSlotId,
+              command)
+              == ArgusWorker::StreamControlCodecStatus::NonceMismatch,
+          "Wrong-nonce acknowledgement must fail closed");
+    wrongCommandNonce.fill('\0');
 
     QByteArray wrongNonce = nonce;
     wrongNonce[0] ^= static_cast<char>(0xff);
@@ -1148,14 +1266,14 @@ void checkFrameSlotWriter()
         nullptr,
         PAGE_READWRITE,
         0,
-        144 + 16,
+        160 + 16,
         reinterpret_cast<LPCWSTR>(mapName.utf16()));
     unsigned char* view = static_cast<unsigned char*>(MapViewOfFile(
         mapping,
         FILE_MAP_ALL_ACCESS,
         0,
         0,
-        144 + 16));
+        160 + 16));
     check(mutex != nullptr && mapping != nullptr && view != nullptr,
           "Native frame-slot fixture must create task-owned handles");
     if (mutex == nullptr || mapping == nullptr || view == nullptr) {
@@ -1165,21 +1283,25 @@ void checkFrameSlotWriter()
         return;
     }
 
-    std::memset(view, 0, 144 + 16);
-    std::memcpy(view, "ARGFRM02", 8);
+    std::memset(view, 0, 160 + 16);
+    std::memcpy(view, "ARGFRM03", 8);
     const auto writeInt32 = [view](int offset, qint32 value) {
         const qint32 littleEndian = qToLittleEndian(value);
         std::memcpy(view + offset, &littleEndian, sizeof(littleEndian));
     };
-    writeInt32(8, 2);
+    writeInt32(8, 3);
     std::memcpy(view + 24, session.machineId.data(), 16);
     std::memcpy(view + 40, session.attemptId.data(), 16);
     std::memcpy(view + 56, session.sessionId.data(), 16);
+    const QByteArray slotId = QByteArray::fromHex(
+        "d0749ffb583d5a46b0a5047e3ddd5a90");
+    std::memcpy(view + 72, slotId.constData(), 16);
 
     ArgusWorker::StartupFrameSlotDescriptor descriptor;
     descriptor.mapName = mapName;
     descriptor.mutexName = mutexName;
-    descriptor.protocolVersion = 2;
+    std::memcpy(descriptor.frameSlotId.data(), slotId.constData(), 16);
+    descriptor.protocolVersion = 3;
     descriptor.maxWidth = 2;
     descriptor.maxHeight = 2;
     descriptor.maxPayloadBytes = 16;
@@ -1200,13 +1322,13 @@ void checkFrameSlotWriter()
     qint32 state;
     qint64 timestamp;
     std::memcpy(&state, view + 12, sizeof(state));
-    std::memcpy(&timestamp, view + 80, sizeof(timestamp));
+    std::memcpy(&timestamp, view + 96, sizeof(timestamp));
     state = qFromLittleEndian(state);
     timestamp = qFromLittleEndian(timestamp);
     check(state == 2
               && timestamp == 638895345678901234LL
-              && std::memcmp(view + 144, pixels.constData(), 16) == 0,
-          "Native writer layout must match managed frame-slot v2");
+              && std::memcmp(view + 160, pixels.constData(), 16) == 0,
+          "Native writer layout must match managed frame-slot v3");
     check(writer.publish(
               1,
               638895345678901235LL,
@@ -1214,11 +1336,11 @@ void checkFrameSlotWriter()
               2,
               8,
               pixels)
-              == ArgusWorker::FrameSlotPublishStatus::OutOfOrder,
-          "Native writer must reject stale sequence values");
+              == ArgusWorker::FrameSlotPublishStatus::OutstandingFrame,
+          "Native writer must preserve an outstanding frame without overwrite");
     writer.close();
 
-    SecureZeroMemory(view + 144, 16);
+    SecureZeroMemory(view + 160, 16);
     UnmapViewOfFile(view);
     CloseHandle(mapping);
     CloseHandle(mutex);
@@ -1339,6 +1461,7 @@ StreamControlOutcome executeStreamControl(
     const QString&,
     const QString&,
     const StartupFrameSlotDescriptor&,
+    StartupChannel&,
     StreamControlRequest& request,
     StreamControlResponse& response)
 {

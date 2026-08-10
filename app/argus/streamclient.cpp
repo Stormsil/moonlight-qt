@@ -15,6 +15,7 @@
 #include <memory>
 #include <algorithm>
 #include <stdexcept>
+#include <thread>
 
 namespace ArgusWorker
 {
@@ -42,6 +43,7 @@ StreamControlOutcome executeStreamControl(
     const QString& startupEndpoint,
     const QString& startupDisplayId,
     const StartupFrameSlotDescriptor& startupFrameSlot,
+    StartupChannel& channel,
     StreamControlRequest& request,
     StreamControlResponse& response)
 {
@@ -172,20 +174,15 @@ StreamControlOutcome executeStreamControl(
         const Session::ArgusHeadlessOutcome sessionOutcome =
             streamSession.runArgusHeadless(
                 request.firstFrameTimeoutMilliseconds());
+        const auto streamCleanup = qScopeGuard([&streamSession]() {
+            streamSession.stopArgusHeadless();
+        });
         failureCode = streamSession.argusFailureCode();
-        const DecodedFrameMetadata metadata = sink.metadata();
+        DecodedFrameMetadata metadata = sink.metadata();
         switch (sessionOutcome) {
         case Session::ArgusHeadlessOutcome::FirstFrame:
             if (metadata.frameCount >= 1) {
-                response.setCompleted(
-                    session,
-                    metadata.frameCount,
-                    metadata.width,
-                    metadata.height,
-                    metadata.stride,
-                    metadata.sequence,
-                    metadata.timestampUtcTicks);
-                return StreamControlOutcome::Completed;
+                break;
             }
             outcome = StreamControlOutcome::Rejected;
             phase = StreamControlPhase::FirstFrameWait;
@@ -206,6 +203,130 @@ StreamControlOutcome executeStreamControl(
             phase = StreamControlPhase::FirstFrameWait;
             outcome = StreamControlOutcome::Unavailable;
             break;
+        }
+        if (sessionOutcome == Session::ArgusHeadlessOutcome::FirstFrame
+                && metadata.frameCount >= 1) {
+            StreamControlSequenceFence fence;
+            qint32 consumedFrameCount = 0;
+            DecodedFrameMetadata lastConsumed;
+            bool frameReady = true;
+            while (true) {
+                StreamControlCommand command;
+                StartupChannelStatus commandStatus =
+                    StartupChannelStatus::IoFailure;
+                if (frameReady) {
+                    if (fence.acceptFrameReady(metadata.sequence)
+                            != StreamControlTransition::Accepted
+                            || channel.sendFrameReady(
+                                session,
+                                startupFrameSlot,
+                                metadata.sequence,
+                                metadata.width,
+                                metadata.height,
+                                metadata.stride,
+                                metadata.timestampUtcTicks)
+                                != StartupChannelStatus::Accepted) {
+                        outcome = StreamControlOutcome::Unavailable;
+                        phase = StreamControlPhase::Disconnect;
+                        break;
+                    }
+                    commandStatus = channel.receiveStreamCommand(
+                        session,
+                        startupFrameSlot,
+                        command,
+                        30000);
+                }
+                else {
+                    std::thread commandReader([&]() {
+                        commandStatus = channel.receiveStreamCommand(
+                            session,
+                            startupFrameSlot,
+                            command,
+                            30000);
+                        sink.notifyControl();
+                    });
+                    DecodedFrameMetadata nextMetadata;
+                    DecodedFrameWaitOutcome waitOutcome =
+                        sink.waitForFrameOrControl(
+                            metadata.sequence,
+                            30000,
+                            nextMetadata);
+                    if (waitOutcome
+                            == DecodedFrameWaitOutcome::FrameReady) {
+                        metadata = nextMetadata;
+                        frameReady = true;
+                        if (fence.acceptFrameReady(metadata.sequence)
+                                != StreamControlTransition::Accepted
+                                || channel.sendFrameReady(
+                                    session,
+                                    startupFrameSlot,
+                                    metadata.sequence,
+                                    metadata.width,
+                                    metadata.height,
+                                    metadata.stride,
+                                    metadata.timestampUtcTicks)
+                                    != StartupChannelStatus::Accepted) {
+                            commandReader.join();
+                            sink.clearControlNotification();
+                            outcome = StreamControlOutcome::Unavailable;
+                            phase = StreamControlPhase::Disconnect;
+                            break;
+                        }
+                        DecodedFrameMetadata ignored;
+                        waitOutcome = sink.waitForFrameOrControl(
+                            metadata.sequence,
+                            30000,
+                            ignored);
+                    }
+                    commandReader.join();
+                    sink.clearControlNotification();
+                    if (waitOutcome != DecodedFrameWaitOutcome::Control) {
+                        outcome = waitOutcome
+                                == DecodedFrameWaitOutcome::TimedOut
+                            ? StreamControlOutcome::DecodeTimedOut
+                            : StreamControlOutcome::Unavailable;
+                        phase = StreamControlPhase::Disconnect;
+                        break;
+                    }
+                }
+
+                if (commandStatus != StartupChannelStatus::Accepted) {
+                    outcome = StreamControlOutcome::Unavailable;
+                    phase = StreamControlPhase::Disconnect;
+                    break;
+                }
+                if (command.kind == StreamControlCommandKind::Disconnect) {
+                    if (frameReady
+                            || consumedFrameCount < 1
+                            || fence.acceptTerminal()
+                                != StreamControlTransition::Accepted) {
+                        outcome = StreamControlOutcome::Rejected;
+                        phase = StreamControlPhase::Disconnect;
+                        break;
+                    }
+                    response.setCompleted(
+                        session,
+                        consumedFrameCount,
+                        lastConsumed.width,
+                        lastConsumed.height,
+                        lastConsumed.stride,
+                        lastConsumed.sequence,
+                        lastConsumed.timestampUtcTicks);
+                    return StreamControlOutcome::Completed;
+                }
+                if (!frameReady
+                        || fence.acceptFrameConsumed(command.sequence)
+                            != StreamControlTransition::Accepted
+                        || !sink.acknowledgeConsumed(command.sequence)) {
+                    outcome = StreamControlOutcome::Rejected;
+                    phase = StreamControlPhase::Disconnect;
+                    break;
+                }
+
+                consumedFrameCount++;
+                lastConsumed = metadata;
+                frameReady = false;
+            }
         }
     }
     catch (...) {

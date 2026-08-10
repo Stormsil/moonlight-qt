@@ -1171,28 +1171,24 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
                 false,
                 m_VideoDecoder)) {
         LiRequestIdrFrame();
-        QElapsedTimer timer;
-        timer.start();
-        while (timer.elapsed() < firstFrameTimeoutMilliseconds
-                && m_ArgusTerminationCode.loadAcquire() == 0
-                && ArgusWorker::activeDecodedFrameFailureCode() == 0
-                && ArgusWorker::activeDecodedFrameMetadata().frameCount == 0) {
-            QCoreApplication::processEvents(
-                QEventLoop::ExcludeUserInputEvents);
-            SDL_Delay(5);
-        }
-
-        if (ArgusWorker::activeDecodedFrameMetadata().frameCount > 0) {
-            // Keep the real session alive briefly to prove latest-frame
-            // replacement, then perform the command's explicit disconnect.
-            SDL_Delay(100);
+        ArgusWorker::DecodedFrameMetadata metadata;
+        const ArgusWorker::DecodedFrameWaitOutcome waitOutcome =
+            ArgusWorker::waitForActiveDecodedFrameAfter(
+                0,
+                firstFrameTimeoutMilliseconds,
+                metadata);
+        if (waitOutcome
+                == ArgusWorker::DecodedFrameWaitOutcome::FrameReady
+                && metadata.frameCount > 0) {
             outcome = ArgusHeadlessOutcome::FirstFrame;
             m_UnexpectedTermination = false;
         }
         else if (m_ArgusTerminationCode.loadAcquire() != 0) {
             outcome = ArgusHeadlessOutcome::Terminated;
         }
-        else if (ArgusWorker::activeDecodedFrameFailureCode() != 0) {
+        else if (waitOutcome
+                == ArgusWorker::DecodedFrameWaitOutcome::Failed
+                || ArgusWorker::activeDecodedFrameFailureCode() != 0) {
             outcome = ArgusHeadlessOutcome::SinkFailed;
         }
         else {
@@ -1200,6 +1196,17 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
         }
     }
 
+    if (outcome != ArgusHeadlessOutcome::FirstFrame) {
+        stopArgusHeadless();
+    }
+    return outcome;
+}
+
+void Session::stopArgusHeadless()
+{
+    if (s_ActiveSession != this) {
+        return;
+    }
     SDL_LockMutex(m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
@@ -1207,7 +1214,6 @@ Session::ArgusHeadlessOutcome Session::runArgusHeadless(
     LiStopConnection();
     s_ActiveSession = nullptr;
     s_ActiveSessionSemaphore.release();
-    return outcome;
 }
 
 void Session::emitLaunchWarning(QString text)

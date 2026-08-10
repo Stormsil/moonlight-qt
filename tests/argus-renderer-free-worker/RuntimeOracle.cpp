@@ -22,14 +22,24 @@
 #include <QtEndian>
 #include <qt_windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 
 namespace
 {
 
-constexpr int HeaderBytes = 144;
+constexpr int HeaderBytes = 160;
 constexpr int MaxPayloadBytes = 8 * 1024 * 1024;
+constexpr int StateOffset = 12;
+constexpr int FrameSlotIdOffset = 72;
+constexpr int SequenceOffset = 88;
+constexpr int TimestampOffset = 96;
+constexpr int PayloadLengthOffset = 120;
+constexpr int ChecksumOffset = 128;
+constexpr int PayloadOffset = 160;
+constexpr int EmptyState = 0;
+constexpr int CommittedState = 2;
 std::atomic<bool> publicationArmed { false };
 std::atomic<int> lastProbeStatus {
     static_cast<int>(ArgusWorker::FrameSlotPublishStatus::NotOpen) };
@@ -64,7 +74,7 @@ struct SharedSlotFixture
             QStringLiteral("Local\\Argus.Stream.Frame.oracle-") + suffix;
         descriptor.mutexName =
             QStringLiteral("Local\\Argus.Stream.FrameLock.oracle-") + suffix;
-        descriptor.protocolVersion = 2;
+        descriptor.protocolVersion = 3;
         descriptor.maxWidth = 1920;
         descriptor.maxHeight = 1080;
         descriptor.maxPayloadBytes = MaxPayloadBytes;
@@ -73,6 +83,8 @@ struct SharedSlotFixture
             session.machineId[index] = static_cast<unsigned char>(index + 1);
             session.attemptId[index] = static_cast<unsigned char>(index + 17);
             session.sessionId[index] = static_cast<unsigned char>(index + 33);
+            descriptor.frameSlotId[index] =
+                static_cast<unsigned char>(index + 49);
         }
 
         mutex = CreateMutexW(
@@ -101,13 +113,67 @@ struct SharedSlotFixture
         }
 
         std::memset(view, 0, HeaderBytes + MaxPayloadBytes);
-        std::memcpy(view, "ARGFRM02", 8);
-        const qint32 protocolVersion = qToLittleEndian<qint32>(2);
+        std::memcpy(view, "ARGFRM03", 8);
+        const qint32 protocolVersion = qToLittleEndian<qint32>(3);
         std::memcpy(view + 8, &protocolVersion, sizeof(protocolVersion));
         std::memcpy(view + 24, session.machineId.data(), 16);
         std::memcpy(view + 40, session.attemptId.data(), 16);
         std::memcpy(view + 56, session.sessionId.data(), 16);
+        std::memcpy(
+            view + FrameSlotIdOffset,
+            descriptor.frameSlotId.data(),
+            16);
         return true;
+    }
+
+    bool consume(qint64 expectedSequence, bool& zeroized)
+    {
+        zeroized = false;
+        if (view == nullptr
+                || WaitForSingleObject(mutex, 5000) != WAIT_OBJECT_0) {
+            return false;
+        }
+
+        const qint32 state = qFromLittleEndian<qint32>(
+            view + StateOffset);
+        const qint64 sequence = qFromLittleEndian<qint64>(
+            view + SequenceOffset);
+        const qint32 payloadLength = qFromLittleEndian<qint32>(
+            view + PayloadLengthOffset);
+        const bool valid = state == CommittedState
+            && sequence == expectedSequence
+            && payloadLength >= 1
+            && payloadLength <= MaxPayloadBytes;
+        if (valid) {
+            SecureZeroMemory(view + PayloadOffset, payloadLength);
+            SecureZeroMemory(view + ChecksumOffset, 32);
+            SecureZeroMemory(view + TimestampOffset, 28);
+            const bool contentsFlushed = FlushViewOfFile(
+                view,
+                PayloadOffset + payloadLength) != FALSE;
+            MemoryBarrier();
+            const qint32 emptyState = qToLittleEndian<qint32>(EmptyState);
+            std::memcpy(
+                view + StateOffset,
+                &emptyState,
+                sizeof(emptyState));
+            MemoryBarrier();
+            const bool stateFlushed = FlushViewOfFile(
+                view + StateOffset,
+                sizeof(emptyState)) != FALSE;
+            zeroized = contentsFlushed
+                && stateFlushed
+                && std::all_of(
+                    view + PayloadOffset,
+                    view + PayloadOffset + payloadLength,
+                    [](unsigned char value) { return value == 0; })
+                && std::all_of(
+                    view + ChecksumOffset,
+                    view + ChecksumOffset + 32,
+                    [](unsigned char value) { return value == 0; });
+        }
+        ReleaseMutex(mutex);
+        return valid && zeroized;
     }
 };
 
@@ -237,10 +303,18 @@ int run(int argc, char* argv[])
     qint32 installFailureCode = 0;
     bool cleanupReinstallSucceeded = false;
     bool decoderInitialized = false;
+    bool outstandingDecoderInitialized = false;
+    bool outstandingOverwriteRejected = false;
+    bool firstFrameConsumed = false;
+    bool firstFrameZeroized = false;
+    bool secondDecoderInitialized = false;
+    bool secondFrameConsumed = false;
+    bool secondFrameZeroized = false;
     bool failureDecoderInitialized = false;
     qint32 publicationFailureCode = 0;
     bool firstFailureLatched = false;
     ArgusWorker::DecodedFrameMetadata publishedMetadata;
+    ArgusWorker::DecodedFrameMetadata secondPublishedMetadata;
 
     if (fixture.view != nullptr) {
         sinkOpened = sink.open(fixture.descriptor, fixture.session)
@@ -283,6 +357,47 @@ int run(int argc, char* argv[])
             publishedMetadata = ArgusWorker::activeDecodedFrameMetadata();
         }
 
+        {
+            FFmpegVideoDecoder decoder(true);
+            publicationArmed.store(true, std::memory_order_release);
+            outstandingDecoderInitialized =
+                decoder.initializeRendererFree(&params);
+            publicationArmed.store(false, std::memory_order_release);
+            outstandingOverwriteRejected =
+                static_cast<ArgusWorker::FrameSlotPublishStatus>(
+                    lastProbeStatus.load(std::memory_order_acquire))
+                    == ArgusWorker::FrameSlotPublishStatus::OutstandingFrame
+                && ArgusWorker::activeDecodedFrameMetadata().sequence == 1;
+            require(
+                outstandingDecoderInitialized && outstandingOverwriteRejected,
+                "outstanding frame slot was overwritten before acknowledgement");
+        }
+
+        firstFrameConsumed = fixture.consume(1, firstFrameZeroized)
+            && sink.acknowledgeConsumed(1);
+        require(
+            firstFrameConsumed && firstFrameZeroized,
+            "first frame was not exactly consumed and zeroized");
+
+        {
+            FFmpegVideoDecoder decoder(true);
+            publicationArmed.store(true, std::memory_order_release);
+            secondDecoderInitialized = decoder.initializeRendererFree(&params);
+            publicationArmed.store(false, std::memory_order_release);
+            secondPublishedMetadata =
+                ArgusWorker::activeDecodedFrameMetadata();
+            require(
+                secondDecoderInitialized
+                    && secondPublishedMetadata.sequence == 2
+                    && secondPublishedMetadata.frameCount == 2,
+                "second decoded frame was not published after exact acknowledgement");
+        }
+        secondFrameConsumed = fixture.consume(2, secondFrameZeroized)
+            && sink.acknowledgeConsumed(2);
+        require(
+            secondFrameConsumed && secondFrameZeroized,
+            "second frame was not exactly consumed and zeroized");
+
         std::memset(fixture.view + 56, 0, 16);
         {
             FFmpegVideoDecoder decoder(true);
@@ -322,6 +437,12 @@ int run(int argc, char* argv[])
             && publishedMetadata.width > 0
             && publishedMetadata.height > 0,
         "decoded first frame was not published to the sink");
+    require(
+        secondPublishedMetadata.frameCount == 2
+            && secondPublishedMetadata.sequence == 2
+            && secondPublishedMetadata.width > 0
+            && secondPublishedMetadata.height > 0,
+        "decoded second frame was not published to the sink");
 
     if (sinkInstalled) {
         ArgusWorker::uninstallDecodedFrameSink(&sink);
@@ -380,7 +501,7 @@ int run(int argc, char* argv[])
         "interactive path did not construct its window and renderer");
 
     QJsonObject receipt {
-        { QStringLiteral("schemaVersion"), 2 },
+        { QStringLiteral("schemaVersion"), 3 },
         { QStringLiteral("authority"), QJsonObject {
             { QStringLiteral("artifact"), QJsonObject {
                 { QStringLiteral("sha256"), artifactSha256 },
@@ -403,11 +524,24 @@ int run(int argc, char* argv[])
         } },
         { QStringLiteral("worker"), QJsonObject {
             { QStringLiteral("decoderInitialized"), decoderInitialized },
+            { QStringLiteral("outstandingDecoderInitialized"),
+                outstandingDecoderInitialized },
+            { QStringLiteral("outstandingOverwriteRejected"),
+                outstandingOverwriteRejected },
             { QStringLiteral("firstFramePublished"),
                 publishedMetadata.frameCount == 1 },
-            { QStringLiteral("frameCount"), publishedMetadata.frameCount },
-            { QStringLiteral("width"), publishedMetadata.width },
-            { QStringLiteral("height"), publishedMetadata.height },
+            { QStringLiteral("firstFrameConsumed"), firstFrameConsumed },
+            { QStringLiteral("firstFrameZeroized"), firstFrameZeroized },
+            { QStringLiteral("secondDecoderInitialized"),
+                secondDecoderInitialized },
+            { QStringLiteral("secondFramePublished"),
+                secondPublishedMetadata.frameCount == 2 },
+            { QStringLiteral("secondFrameConsumed"), secondFrameConsumed },
+            { QStringLiteral("secondFrameZeroized"), secondFrameZeroized },
+            { QStringLiteral("frameCount"),
+                secondPublishedMetadata.frameCount },
+            { QStringLiteral("width"), secondPublishedMetadata.width },
+            { QStringLiteral("height"), secondPublishedMetadata.height },
             { QStringLiteral("constructionCalls"),
                 constructionJson(workerCounts) },
         } },
