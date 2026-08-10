@@ -3,7 +3,7 @@
   "artifact": "content-addressed Moonlight.exe Argus worker",
   "artifactSourceCommit": "747ef82ee6824413faa15ef122721756360b5fe9",
   "artifactSourceTree": "859647d2130abe624ee999bedee21e11df5fa3de",
-  "buildLogicCommitAuthority": "e842830b7136d1bcb4093389c639103f48392c72",
+  "buildLogicCommitAuthority": "f94e76989e6e484164a0bf02b1498defd6271872",
   "upstreamCommit": "546cb72e32e5ac04bbc7e0b3a254176e5696685a",
   "sourceRepository": "https://github.com/Stormsil/moonlight-qt",
   "sourceBranch": "fix/issue-979-renderer-free-worker",
