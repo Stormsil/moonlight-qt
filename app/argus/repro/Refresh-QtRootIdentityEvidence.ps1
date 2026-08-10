@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $workerSha256 =
-    'AB4933F865EA3D58B9A4C7DE9D14AAF31002D6969C66E11EF1FDB39FA93919CE'
+    '6A6F8A499797F5A46B0601D0CECD391C96C7FF45B5F13289FF07B26D58FF4D8D'
 $canonicalQtSha256 =
     'B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8'
 $packageReceiptSha256 =
@@ -246,14 +246,14 @@ if ($sourceInventory.schemaVersion -ne 4 -or
 Set-JsonProperty $sourceInventory.qtInput 'rootIdentityAlgorithm' `
     'sha256-uppercase-normalized-absolute-path-utf8-v1'
 Set-JsonProperty $sourceInventory 'sourceBranch' `
-    'fix/issue-975-request-validation'
+    'fix/issue-979-renderer-free-worker'
 Set-JsonProperty $sourceInventory 'artifactSourceCommit' `
     $proof.source.forkCommit
 Set-JsonProperty $sourceInventory 'artifactSourceTree' `
     $proof.source.sourceTree
 Set-JsonProperty $sourceInventory 'artifactSha256' $workerSha256
 Set-JsonProperty $correspondingSource 'sourceBranch' `
-    'fix/issue-975-request-validation'
+    'fix/issue-979-renderer-free-worker'
 Set-JsonProperty $correspondingSource 'artifactSourceCommit' `
     $proof.source.forkCommit
 Set-JsonProperty $correspondingSource 'artifactSourceTree' `

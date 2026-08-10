@@ -5,8 +5,8 @@
   "requiredAncestor": "014dc6fff6ed7790c6ff411cec05cbd709d3bad9",
   "worker": {
     "fileName": "Moonlight.exe",
-    "sha256": "AB4933F865EA3D58B9A4C7DE9D14AAF31002D6969C66E11EF1FDB39FA93919CE",
-    "length": 2830848
+    "sha256": "6A6F8A499797F5A46B0601D0CECD391C96C7FF45B5F13289FF07B26D58FF4D8D",
+    "length": 2833408
   },
   "antiHooking": {
     "fileName": "AntiHooking.dll",

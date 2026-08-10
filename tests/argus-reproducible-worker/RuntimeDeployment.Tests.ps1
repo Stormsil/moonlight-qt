@@ -20,9 +20,9 @@ Assert-Equal 6 $contract.manifestSchemaVersion `
     'Runtime manifest schema drifted.'
 Assert-Equal '014dc6fff6ed7790c6ff411cec05cbd709d3bad9' `
     $contract.requiredAncestor 'Producer ancestry drifted.'
-Assert-Equal 'AB4933F865EA3D58B9A4C7DE9D14AAF31002D6969C66E11EF1FDB39FA93919CE' `
+Assert-Equal '6A6F8A499797F5A46B0601D0CECD391C96C7FF45B5F13289FF07B26D58FF4D8D' `
     $contract.worker.sha256 'Worker identity drifted.'
-Assert-Equal 2830848 $contract.worker.length 'Worker length drifted.'
+Assert-Equal 2833408 $contract.worker.length 'Worker length drifted.'
 Assert-Equal 'B795CF0072ABA8E313B0F127B01E48B1C328A81D03CBA8B1B121D18420934D14' `
     $contract.antiHooking.sha256 'AntiHooking identity drifted.'
 Assert-Equal 47104 $contract.antiHooking.length 'AntiHooking length drifted.'
