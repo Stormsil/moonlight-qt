@@ -19,20 +19,14 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-f]{40}$')]
     [string] $BuildLogicCommitAuthority,
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[a-z0-9][a-z0-9._/-]+$')]
+    [string] $SourceBranch,
     [Parameter(Mandatory = $true)] [string] $BotRoot
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
-$workerSha256 =
-    '7C1679E451DE24FDB570FBA348450A4175876E0CEC77CBB7A91DBFD2F196C716'
-$canonicalQtSha256 =
-    'B8272265B99CCEE3227C4B01E12517482DC913FC91A23A3BB609961FF3696FD8'
-$packageReceiptSha256 =
-    'BA123F16C09445C65B4A2D06B976D9FB440D978D420F09D6EB836FE5D1C11C48'
-$archiveSetSha256 =
-    '5E2401AB07D6F2B63D8D2FC9991E261840D088A6BD0FD5414649CB9578165C02'
 
 function Get-PathIdentity {
     param([string] $Path)
@@ -87,6 +81,31 @@ function Get-CrLfFileSha256 {
         [Security.Cryptography.SHA256]::HashData(
             [Text.UTF8Encoding]::new($false).GetBytes($canonical)))
 }
+
+$originalProof = Get-Content -Raw -LiteralPath `
+    (Resolve-Path -LiteralPath $ProofPath) | ConvertFrom-Json
+if ($originalProof.schemaVersion -ne 2 -or
+    $originalProof.worker.sha256 -cnotmatch '^[0-9A-F]{64}$' -or
+    $originalProof.worker.byteForByteIdentical -ne $true -or
+    $originalProof.buildReceipts.Count -ne 2 -or
+    $originalProof.inputs.qt.identity.canonicalTreeSha256 -cnotmatch
+        '^[0-9A-F]{64}$') {
+    throw 'The current atomic proof is invalid.'
+}
+$workerSha256 = $originalProof.worker.sha256
+$canonicalQtSha256 =
+    $originalProof.inputs.qt.identity.canonicalTreeSha256
+$packageReceiptPath = (Resolve-Path -LiteralPath `
+        $PackageObjectReceiptPath).Path
+$packageReceipt = Get-Content -Raw -LiteralPath $packageReceiptPath |
+    ConvertFrom-Json
+if ($packageReceipt.schemaVersion -ne 1 -or
+    $packageReceipt.archiveSetSha256 -cnotmatch '^[0-9A-F]{64}$') {
+    throw 'The admitted Qt package object receipt is invalid.'
+}
+$packageReceiptSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        $packageReceiptPath).Hash
+$archiveSetSha256 = $packageReceipt.archiveSetSha256
 
 $qtRoots = @(
     (Resolve-Path -LiteralPath $QtRootA).Path,
@@ -175,8 +194,6 @@ $buildRoots = @(
 $atomicReceiptPaths = @($buildRoots | ForEach-Object {
         Join-Path $_ 'artifact\reproducible-worker-receipt.json'
     })
-$originalProof = Get-Content -Raw -LiteralPath `
-    (Resolve-Path -LiteralPath $ProofPath) | ConvertFrom-Json
 if ($originalProof.schemaVersion -ne 2 -or
     $originalProof.worker.sha256 -cne $workerSha256 -or
     $originalProof.worker.byteForByteIdentical -ne $true -or
@@ -245,15 +262,13 @@ if ($sourceInventory.schemaVersion -ne 4 -or
 }
 Set-JsonProperty $sourceInventory.qtInput 'rootIdentityAlgorithm' `
     'sha256-uppercase-normalized-absolute-path-utf8-v1'
-Set-JsonProperty $sourceInventory 'sourceBranch' `
-    'fix/issue-979-renderer-free-worker'
+Set-JsonProperty $sourceInventory 'sourceBranch' $SourceBranch
 Set-JsonProperty $sourceInventory 'artifactSourceCommit' `
     $proof.source.forkCommit
 Set-JsonProperty $sourceInventory 'artifactSourceTree' `
     $proof.source.sourceTree
 Set-JsonProperty $sourceInventory 'artifactSha256' $workerSha256
-Set-JsonProperty $correspondingSource 'sourceBranch' `
-    'fix/issue-979-renderer-free-worker'
+Set-JsonProperty $correspondingSource 'sourceBranch' $SourceBranch
 Set-JsonProperty $correspondingSource 'artifactSourceCommit' `
     $proof.source.forkCommit
 Set-JsonProperty $correspondingSource 'artifactSourceTree' `

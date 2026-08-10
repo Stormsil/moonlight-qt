@@ -1,8 +1,11 @@
 app/argus/common-c/*.patch text eol=lf
 app/argus/package/*.json text eol=lf
+app/argus/repro/*.ps1 text eol=lf
+app/argus/repro/*.json text eol=lf
 app/argus/*.cpp text eol=lf
 app/argus/*.h text eol=lf
 app/streaming/session.cpp text eol=lf
 app/streaming/session.h text eol=lf
 tests/argus-renderer-free-worker/* text eol=lf
+tests/argus-reproducible-worker/*.ps1 text eol=lf
 tests/argus-worker-bootstrap/*.cpp text eol=lf
